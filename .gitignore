@@ -1,0 +1,5 @@
+/target
+/dist
+/config
+/web-export
+*.deb
