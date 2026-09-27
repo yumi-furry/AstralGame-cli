@@ -5,271 +5,371 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Astral Server</title>
 <style>
+/* ===== 主题变量（默认紫罗兰/浅色，与 chmlfrp 一致） ===== */
 :root {
-  --bg: #f5f0eb;
-  --card: #ffffff;
-  --sidebar: #faf7f5;
-  --text: #2c2c2c;
-  --text2: #8a8580;
-  --accent: #b08d6a;
-  --accent2: #c4a882;
-  --border: #e8e2dc;
-  --green: #4caf50;
-  --red: #e53935;
-  --orange: #ff9800;
-  --radius: 14px;
-  --shadow: 0 2px 12px rgba(0,0,0,.06);
+  --primary: #8B5CF6;
+  --primary-hover: #7C3AED;
+  --primary-soft: #EDE9FE;
+  --primary-softer: #F5F3FF;
+  --bg: #F7F6FB;
+  --bg-sidebar: #FBFAFF;
+  --bg-card: #FFFFFF;
+  --text: #1F2937;
+  --text2: #6B7280;
+  --border: #E5E7EB;
+  --success: #10B981;
+  --danger: #EF4444;
+  --warning: #F59E0B;
+  --radius: 12px;
+  --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
 }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); display:flex; height:100vh; overflow:hidden; }
 
-.sidebar { width: 72px; background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: 16px; flex-shrink: 0; }
-.sidebar .logo { width: 40px; height: 40px; background: #1a1a2e; border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-bottom: 32px; }
-.sidebar .logo svg { width: 22px; height: 22px; fill: #fff; }
-.nav-item { width: 48px; height: 48px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; margin-bottom: 8px; color: var(--text2); font-size: 11px; transition: all .2s; border: none; background: none; }
-.nav-item:hover { background: #f0ebe6; }
-.nav-item.active { background: #f0ebe6; color: var(--accent); }
-.nav-item svg { width: 20px; height: 20px; margin-bottom: 2px; }
-.sidebar-bottom { margin-top: auto; padding-bottom: 16px; }
+/* ===== 侧边栏 ===== */
+.sidebar { width:216px; background:var(--bg-sidebar); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:20px 12px; flex-shrink:0; }
+.logo { display:flex; align-items:center; gap:10px; padding:4px 10px 22px; font-weight:700; font-size:17px; }
+.logo .mark { width:34px; height:34px; border-radius:10px; background:linear-gradient(135deg,var(--primary),var(--primary-hover)); color:#fff; display:flex; align-items:center; justify-content:center; font-size:18px; }
+.logo span { background:linear-gradient(135deg,var(--primary),var(--primary-hover)); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+.nav { flex:1; display:flex; flex-direction:column; gap:4px; }
+.nav-item { display:flex; align-items:center; gap:12px; padding:11px 14px; border-radius:9px; cursor:pointer; color:var(--text2); font-size:14px; border:none; background:none; text-align:left; transition:all .18s; border-left:3px solid transparent; }
+.nav-item .ico { font-size:17px; width:20px; text-align:center; }
+.nav-item:hover { background:var(--primary-softer); color:var(--text); }
+.nav-item.active { background:var(--primary-soft); color:var(--primary); font-weight:600; border-left-color:var(--primary); }
+.sidebar .spacer { flex:1; }
+.user-chip { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; background:var(--primary-softer); cursor:pointer; }
+.user-chip .avatar { width:34px; height:34px; border-radius:50%; background:var(--primary-soft); display:flex; align-items:center; justify-content:center; font-size:17px; }
+.user-chip .u-name { font-size:13px; font-weight:600; }
+.user-chip .u-sub { font-size:11px; color:var(--text2); }
+.user-chip .edit { margin-left:auto; color:var(--text2); font-size:13px; }
 
-.main { flex: 1; overflow-y: auto; padding: 24px 32px; }
-.page { display: none; }
-.page.active { display: block; }
-.page-title { font-size: 22px; font-weight: 600; margin-bottom: 20px; }
+/* ===== 主区域 ===== */
+.main { flex:1; overflow-y:auto; }
+.topbar { display:flex; align-items:center; justify-content:space-between; padding:22px 28px 8px; }
+.topbar .greet { display:flex; align-items:center; gap:14px; }
+.topbar .g-avatar { width:44px; height:44px; border-radius:50%; background:var(--primary-soft); display:flex; align-items:center; justify-content:center; font-size:22px; }
+.topbar .g-title { font-size:17px; font-weight:600; }
+.topbar .g-sub { font-size:12px; color:var(--text2); margin-top:2px; }
+.topbar .actions { display:flex; gap:10px; }
 
-.card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; margin-bottom: 16px; }
-.card-title { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
+.content { padding:12px 28px 28px; }
+.page { display:none; }
+.page.active { display:block; }
 
-.btn { padding: 10px 24px; border-radius: 24px; border: none; font-size: 14px; cursor: pointer; font-weight: 500; transition: all .2s; }
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { background: var(--accent2); }
-.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
-.btn-outline:hover { background: #f5f0eb; }
-.btn-danger { background: var(--red); color: #fff; }
-.btn-sm { padding: 6px 14px; font-size: 13px; border-radius: 18px; }
+/* ===== 卡片 ===== */
+.card { background:var(--bg-card); border-radius:var(--radius); box-shadow:var(--shadow); padding:20px; margin-bottom:16px; }
+.card-title { font-size:15px; font-weight:600; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.card-title .sub { font-size:12px; font-weight:400; color:var(--text2); }
 
-.connect-actions { display: flex; gap: 16px; justify-content: center; margin-top: 40px; }
-.connect-actions .btn { padding: 14px 40px; font-size: 16px; border-radius: 28px; }
+/* 统计卡片行 */
+.stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:16px; }
+.stat { background:var(--primary-softer); border-radius:var(--radius); padding:18px; }
+.stat .s-label { font-size:13px; color:var(--text2); display:flex; align-items:center; gap:8px; }
+.stat .s-num { font-size:26px; font-weight:700; margin-top:8px; font-variant-numeric:tabular-nums; }
 
-.modal-mask { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 100; align-items: center; justify-content: center; }
-.modal-mask.open { display: flex; }
-.modal { background: var(--card); border-radius: 16px; width: 480px; max-height: 80vh; overflow-y: auto; padding: 24px; box-shadow: 0 8px 40px rgba(0,0,0,.15); }
-.modal-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
-.modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text2); }
-.modal-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 20px; }
+/* ===== 按钮 ===== */
+.btn { padding:9px 20px; border-radius:9px; border:none; font-size:14px; cursor:pointer; font-weight:500; transition:all .18s; }
+.btn-primary { background:var(--primary); color:#fff; }
+.btn-primary:hover { background:var(--primary-hover); }
+.btn-outline { background:transparent; border:1px solid var(--border); color:var(--text); }
+.btn-outline:hover { background:var(--primary-softer); }
+.btn-danger { background:var(--danger); color:#fff; }
+.btn-danger:hover { filter:brightness(.92); }
+.btn-sm { padding:6px 14px; font-size:13px; border-radius:8px; }
+.btn-block { width:100%; }
 
-.game-item { display: flex; align-items: center; padding: 12px 16px; border-radius: 10px; cursor: pointer; transition: background .15s; }
-.game-item:hover { background: #f5f0eb; }
-.game-item.selected { background: #f0ebe6; }
-.game-item .check { margin-left: auto; color: var(--accent); font-size: 18px; }
-.game-icon { width: 36px; height: 36px; border-radius: 8px; background: #e8e2dc; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 18px; flex-shrink: 0; }
-.game-info { flex: 1; }
-.game-name { font-weight: 500; font-size: 14px; }
-.game-desc { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.hero { text-align:center; padding:56px 20px 40px; }
+.hero .big { font-size:56px; margin-bottom:14px; }
+.hero .h-title { font-size:20px; font-weight:600; margin-bottom:6px; }
+.hero .h-sub { font-size:13px; color:var(--text2); margin-bottom:30px; }
+.hero .cta { display:flex; gap:14px; justify-content:center; }
+.hero .btn { padding:13px 36px; font-size:15px; border-radius:10px; }
 
-input[type="text"], input[type="password"], textarea, select { width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; background: #faf8f6; outline: none; transition: border .2s; }
-input:focus, textarea:focus { border-color: var(--accent); }
-.form-group { margin-bottom: 14px; }
-.form-label { font-size: 13px; color: var(--text2); margin-bottom: 6px; display: block; }
+/* ===== 房间布局 ===== */
+.room-grid { display:grid; grid-template-columns:1fr 320px; gap:16px; align-items:start; }
+@media (max-width:840px){ .room-grid { grid-template-columns:1fr; } }
+.member-item { display:flex; align-items:center; padding:13px 4px; border-bottom:1px solid var(--border); }
+.member-item:last-child { border-bottom:none; }
+.member-avatar { width:42px; height:42px; border-radius:50%; background:var(--primary-soft); display:flex; align-items:center; justify-content:center; font-size:19px; margin-right:14px; flex-shrink:0; color:var(--text); }
+.member-info { flex:1; min-width:0; }
+.member-name { font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px; }
+.member-detail { font-size:12px; color:var(--text2); margin-top:2px; }
+.member-tags { display:flex; gap:6px; margin-top:5px; flex-wrap:wrap; }
+.tag { padding:2px 9px; border-radius:8px; font-size:11px; background:var(--primary-softer); color:var(--text2); }
+.tag.green { background:rgba(16,185,129,.14); color:var(--success); }
+.tag.primary { background:var(--primary-soft); color:var(--primary); }
+.tag.blue { background:var(--primary-softer); color:var(--primary); }
+.member-latency { margin-left:auto; font-size:13px; color:var(--success); font-weight:600; padding-left:12px; }
 
-.room-header { display: flex; gap: 24px; margin-bottom: 24px; }
-.room-card { flex: 1; }
-.room-info-card { width: 320px; flex-shrink: 0; }
-.room-code { font-size: 28px; font-weight: 700; letter-spacing: 2px; color: var(--accent); margin: 8px 0; word-break: break-all; }
-.room-ip { font-size: 14px; color: var(--text2); }
-.member-list { min-height: 200px; }
-.member-item { display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
-.member-item:last-child { border-bottom: none; }
-.member-avatar { width: 40px; height: 40px; border-radius: 50%; background: #e0d5cc; display: flex; align-items: center; justify-content: center; margin-right: 14px; font-size: 16px; color: #8a7a6a; flex-shrink: 0; }
-.member-info { flex: 1; }
-.member-name { font-weight: 500; font-size: 14px; }
-.member-detail { font-size: 12px; color: var(--text2); margin-top: 2px; }
-.member-tags { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
-.tag { padding: 2px 8px; border-radius: 8px; font-size: 11px; background: #f0ebe6; color: var(--text2); }
-.tag.green { background: #e8f5e9; color: #2e7d32; }
-.tag.red { background: #ffebee; color: #c62828; }
-.member-latency { margin-left: auto; font-size: 13px; color: var(--green); font-weight: 500; }
-.empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
-.empty-state .icon { font-size: 48px; margin-bottom: 16px; }
+.room-code { font-size:27px; font-weight:700; letter-spacing:2px; color:var(--primary); margin:8px 0; word-break:break-all; }
+.room-ip { font-size:13px; color:var(--text2); }
+.room-actions { display:flex; gap:10px; margin-top:14px; }
 
-.server-item { display: flex; align-items: center; padding: 14px 20px; background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 10px; }
-.server-latency { width: 64px; text-align: center; font-size: 13px; font-weight: 500; }
-.server-latency .bar { width: 4px; height: 28px; border-radius: 2px; margin: 0 auto 4px; }
-.server-latency.ok { color: var(--green); }
-.server-latency.ok .bar { background: var(--green); }
-.server-latency.slow { color: var(--orange); }
-.server-latency.slow .bar { background: var(--orange); }
-.server-latency.fail { color: var(--red); }
-.server-latency.fail .bar { background: var(--red); }
-.server-info { flex: 1; margin-left: 16px; }
-.server-name { font-weight: 600; font-size: 15px; }
-.server-uri { font-size: 13px; color: var(--text2); margin-top: 2px; }
-.server-switch { margin-left: 16px; }
-.server-menu { display: flex; gap: 4px; margin-left: 12px; }
-.server-menu .btn-icon { width: 32px; height: 32px; border-radius: 8px; border: none; background: transparent; cursor: pointer; font-size: 15px; color: var(--text2); display: flex; align-items: center; justify-content: center; }
-.server-menu .btn-icon:hover { background: #f0ebe6; color: var(--text); }
+/* ===== 表单 ===== */
+.form-group { margin-bottom:14px; }
+.form-label { font-size:13px; color:var(--text2); margin-bottom:6px; display:block; }
+input[type="text"],input[type="password"],textarea,select { width:100%; padding:10px 14px; border:1px solid var(--border); border-radius:9px; font-size:14px; background:var(--bg-card); color:var(--text); outline:none; transition:border .18s; }
+input:focus,textarea:focus,select:focus { border-color:var(--primary); }
+textarea { font-family:"Cascadia Code",Consolas,monospace; font-size:12px; }
 
-.switch { position: relative; width: 44px; height: 24px; display: inline-block; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.switch .slider { position: absolute; inset: 0; background: #d5cec7; border-radius: 24px; cursor: pointer; transition: .3s; }
-.switch .slider::before { content: ''; position: absolute; width: 18px; height: 18px; border-radius: 50%; background: #fff; top: 3px; left: 3px; transition: .3s; }
-.switch input:checked + .slider { background: var(--accent); }
-.switch input:checked + .slider::before { transform: translateX(20px); }
+/* ===== 开关 ===== */
+.switch { position:relative; width:46px; height:26px; display:inline-block; flex-shrink:0; }
+.switch input { opacity:0; width:0; height:0; }
+.switch .slider { position:absolute; inset:0; background:#cbd5e1; border-radius:24px; cursor:pointer; transition:.25s; }
+.switch .slider::before { content:''; position:absolute; width:20px; height:20px; border-radius:50%; background:#fff; top:3px; left:3px; transition:.25s; }
+.switch input:checked + .slider { background:var(--primary); }
+.switch input:checked + .slider::before { transform:translateX(20px); }
 
-.settings-section { margin-bottom: 24px; }
-.settings-section-title { font-size: 13px; color: var(--text2); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
-.settings-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--border); }
-.settings-row:last-child { border-bottom: none; }
-.settings-label { font-size: 14px; font-weight: 500; }
-.settings-desc { font-size: 12px; color: var(--text2); margin-top: 2px; }
+/* 服务器列表 */
+.server-item { display:flex; align-items:center; padding:14px 18px; background:var(--bg-card); border-radius:var(--radius); box-shadow:var(--shadow); margin-bottom:10px; }
+.server-latency { width:64px; text-align:center; font-size:13px; font-weight:600; }
+.server-latency .bar { width:4px; height:26px; border-radius:2px; margin:0 auto 4px; background:#cbd5e1; }
+.server-latency.ok { color:var(--success); } .server-latency.ok .bar { background:var(--success); }
+.server-latency.slow { color:var(--warning); } .server-latency.slow .bar { background:var(--warning); }
+.server-latency.fail { color:var(--danger); } .server-latency.fail .bar { background:var(--danger); }
+.server-info { flex:1; margin-left:16px; min-width:0; }
+.server-name { font-weight:600; font-size:14px; }
+.server-uri { font-size:12px; color:var(--text2); margin-top:2px; word-break:break-all; }
+.server-actions { display:flex; gap:6px; margin-left:12px; }
+.icon-btn { width:32px; height:32px; border-radius:8px; border:none; background:transparent; cursor:pointer; font-size:15px; color:var(--text2); display:flex; align-items:center; justify-content:center; }
+.icon-btn:hover { background:var(--primary-softer); color:var(--text); }
 
-.log-panel { background: #1a1a2e; color: #c8c8d8; border-radius: var(--radius); padding: 16px; font-family: "Cascadia Code", "Fira Code", monospace; font-size: 12px; line-height: 1.7; max-height: 400px; overflow-y: auto; }
-.log-panel .log-info { color: #7ecfff; }
-.log-panel .log-warn { color: #ffd54f; }
-.log-panel .log-error { color: #ef5350; }
-.log-time { color: #666; margin-right: 8px; }
+/* 设置行 */
+.settings-row { display:flex; align-items:center; justify-content:space-between; padding:14px 0; border-bottom:1px solid var(--border); gap:16px; }
+.settings-row:last-child { border-bottom:none; }
+.settings-label { font-size:14px; font-weight:500; }
+.settings-desc { font-size:12px; color:var(--text2); margin-top:2px; }
 
-.toast { position: fixed; top: 24px; right: 24px; padding: 12px 20px; border-radius: 10px; color: #fff; font-size: 14px; z-index: 999; box-shadow: 0 4px 16px rgba(0,0,0,.15); animation: slideIn .3s ease; max-width: 400px; }
-.toast.success { background: var(--green); }
-.toast.error { background: var(--red); }
-@keyframes slideIn { from { transform: translateX(100px); opacity: 0; } to { transform: none; opacity: 1; } }
+/* 主题选择 */
+.theme-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
+.theme-opt { border:2px solid var(--border); border-radius:10px; padding:10px; cursor:pointer; background:var(--bg-card); transition:all .15s; }
+.theme-opt:hover { border-color:var(--primary); }
+.theme-opt.active { border-color:var(--primary); }
+.theme-swatch { display:flex; gap:5px; margin-bottom:8px; }
+.theme-swatch i { width:22px; height:22px; border-radius:6px; }
+.theme-name { font-size:13px; font-weight:600; }
 
-@media (max-width: 768px) {
-  .main { padding: 16px; }
-  .room-header { flex-direction: column; }
-  .room-info-card { width: 100%; }
-  .connect-actions { flex-direction: column; align-items: center; }
-}
+/* 图标选择 */
+.emoji-grid { display:grid; grid-template-columns:repeat(9,1fr); gap:8px; max-height:150px; overflow-y:auto; }
+.emoji-opt { font-size:22px; text-align:center; padding:8px 0; border-radius:9px; cursor:pointer; border:2px solid transparent; }
+.emoji-opt:hover { background:var(--primary-softer); }
+.emoji-opt.active { background:var(--primary-soft); border-color:var(--primary); }
+
+/* 日志 */
+.log-panel { background:#14151a; color:#c8c8d8; border-radius:10px; padding:14px; font-family:"Cascadia Code","Fira Code",monospace; font-size:12px; line-height:1.75; max-height:360px; overflow-y:auto; }
+.log-info { color:#7ecfff; } .log-warn { color:#ffd54f; } .log-error { color:#ff6b6b; }
+.log-time { color:#666; margin-right:8px; }
+
+/* 弹窗 */
+.modal-mask { display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:100; align-items:center; justify-content:center; }
+.modal-mask.open { display:flex; }
+.modal { background:var(--bg-card); border-radius:16px; width:480px; max-width:92vw; max-height:84vh; overflow-y:auto; padding:24px; box-shadow:0 8px 40px rgba(0,0,0,.18); }
+.modal-title { font-size:17px; font-weight:600; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; }
+.modal-close { background:none; border:none; font-size:20px; cursor:pointer; color:var(--text2); }
+.modal-actions { display:flex; justify-content:flex-end; gap:12px; margin-top:20px; }
+
+/* 游戏选择 */
+.game-item { display:flex; align-items:center; padding:12px 14px; border-radius:10px; cursor:pointer; transition:background .15s; }
+.game-item:hover { background:var(--primary-softer); }
+.game-item.selected { background:var(--primary-soft); }
+.game-item .check { margin-left:auto; color:var(--primary); font-weight:700; }
+.game-icon { width:38px; height:38px; border-radius:9px; background:var(--primary-softer); display:flex; align-items:center; justify-content:center; margin-right:12px; font-size:19px; flex-shrink:0; }
+.game-info { flex:1; min-width:0; }
+.game-name { font-weight:500; font-size:14px; }
+.game-desc { font-size:12px; color:var(--text2); margin-top:2px; }
+
+.avatar, .g-avatar, .member-avatar { overflow:hidden; }
+.avatar img, .g-avatar img, .member-avatar img { width:100%; height:100%; object-fit:cover; display:block; }
+.toast { position:fixed; top:22px; right:22px; padding:12px 20px; border-radius:10px; color:#fff; font-size:14px; z-index:999; box-shadow:0 4px 16px rgba(0,0,0,.15); animation:slideIn .3s ease; max-width:420px; }
+.toast.success { background:var(--success); }
+.toast.error { background:var(--danger); }
+@keyframes slideIn { from{transform:translateX(80px);opacity:0} to{transform:none;opacity:1} }
+.warn-note { font-size:11px; color:var(--text2); margin-top:6px; line-height:1.5; }
+.divider { height:1px; background:var(--border); margin:18px 0; }
+.section-label { font-size:12px; color:var(--text2); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
+#login-view { position:fixed; inset:0; background:var(--bg); z-index:1000; display:flex; align-items:center; justify-content:center; }
+#login-view.hidden { display:none; }
+.login-card { background:var(--bg-card); border-radius:16px; box-shadow:var(--shadow); padding:36px 32px; width:360px; max-width:90vw; }
+.login-logo { font-size:22px; font-weight:700; text-align:center; background:linear-gradient(135deg,var(--primary),var(--primary-hover)); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; margin-bottom:6px; }
+.login-sub { text-align:center; color:var(--text2); font-size:13px; margin-bottom:24px; }
+#login-view input { margin-bottom:12px; }
+.login-error { color:var(--danger); font-size:12px; min-height:16px; margin:4px 0 8px; }
 </style>
 </head>
 <body>
-
+<div id="login-view">
+  <div class="login-card">
+    <div class="login-logo">✦ Astral Server</div>
+    <div class="login-sub">请登录以继续</div>
+    <form onsubmit="doLogin(event)">
+      <input type="text" id="login-username" placeholder="用户名" autocomplete="username">
+      <input type="password" id="login-password" placeholder="密码" autocomplete="current-password">
+      <div class="login-error" id="login-error"></div>
+      <button type="submit" class="btn btn-primary btn-block">登录</button>
+    </form>
+  </div>
+</div>
 <div class="sidebar">
   <div class="logo">
-    <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+    <div class="mark">✦</div><span>Astral Server</span>
   </div>
-  <button class="nav-item active" data-page="connect" onclick="switchPage('connect')">
-    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 7.5V2H9v5.5l3 3 3-3zM7.5 9H2v6h5.5l3-3-3-3zM9 16.5V22h6v-5.5l-3-3-3 3zM16.5 9l-3 3 3 3H22V9h-5.5z"/></svg>
-    联机
-  </button>
-  <button class="nav-item" data-page="servers" onclick="switchPage('servers')">
-    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 6H4V4h16v4zm0 4H4c-1.1 0-2 .9-2 2v4c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2v-4c0-1.1-.9-2-2-2zm0 6H4v-4h16v4z"/></svg>
-    服务器
-  </button>
-  <button class="nav-item" data-page="settings" onclick="switchPage('settings')">
-    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-    设置
-  </button>
-  <div class="sidebar-bottom">
-    <button class="nav-item" onclick="editProfile()" title="编辑资料">
-      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-    </button>
+  <div class="nav">
+    <button class="nav-item active" data-page="connect" onclick="switchPage('connect')"><span class="ico">🎮</span>联机</button>
+    <button class="nav-item" data-page="servers" onclick="switchPage('servers')"><span class="ico">📡</span>服务器</button>
+    <button class="nav-item" data-page="settings" onclick="switchPage('settings')"><span class="ico">⚙️</span>设置</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="user-chip" onclick="openEditProfile()">
+    <div class="avatar" id="side-avatar">🎮</div>
+    <div><div class="u-name" id="side-name">服务器</div><div class="u-sub">点击编辑资料</div></div>
+    <div class="edit">✎</div>
   </div>
 </div>
 
 <div class="main">
-
-  <!-- ===== 联机页 ===== -->
-  <div class="page active" id="page-connect">
-    <div id="connect-home">
-      <div class="empty-state" style="padding-top:120px;">
-        <div style="font-size:64px;margin-bottom:24px;">🎮</div>
-        <div style="font-size:18px;font-weight:500;margin-bottom:8px;">Astral Server</div>
-        <div style="font-size:14px;color:var(--text2);margin-bottom:40px;">创建或加入一个房间开始联机</div>
-        <div class="connect-actions">
-          <button class="btn btn-primary" onclick="showCreateRoom()">＋ 创建房间</button>
-          <button class="btn btn-outline" onclick="showJoinRoom()">⇥ 加入房间</button>
-        </div>
+  <!-- 顶栏 -->
+  <div class="topbar">
+    <div class="greet">
+      <div class="g-avatar" id="top-avatar">🎮</div>
+      <div>
+        <div class="g-title" id="top-greet">你好，服务器</div>
+        <div class="g-sub" id="top-sub">欢迎使用 Astral Server</div>
       </div>
     </div>
-    <div id="connect-room" style="display:none;">
-      <div class="room-header">
-        <div class="card room-card">
-          <div class="card-title" id="room-title">房间 · 成员</div>
-          <div class="member-list" id="member-list">
-            <div class="empty-state"><div class="icon">⏳</div><div>等待成员加入…</div></div>
+    <div class="actions">
+      <button class="btn btn-outline btn-sm" onclick="openEditProfile()">编辑资料</button>
+      <button class="btn btn-primary btn-sm" onclick="refreshAll()">刷新</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <!-- ===== 联机页 ===== -->
+    <div class="page active" id="page-connect">
+      <div id="connect-home">
+        <div class="card">
+          <div class="stats">
+            <div class="stat"><div class="s-label">🎮 游戏数</div><div class="s-num" id="stat-games">—</div></div>
+            <div class="stat"><div class="s-label">👥 在线成员</div><div class="s-num" id="stat-members">0</div></div>
+            <div class="stat"><div class="s-label">🔗 运行状态</div><div class="s-num" id="stat-running" style="font-size:18px;line-height:26px;">未运行</div></div>
+            <div class="stat"><div class="s-label">🌐 虚拟 IP</div><div class="s-num" id="stat-ip" style="font-size:17px;">—</div></div>
           </div>
         </div>
-        <div class="room-info-card">
+        <div class="hero">
+          <div class="big">🎮</div>
+          <div class="h-title">创建或加入一个房间</div>
+          <div class="h-sub">无头服务器常驻组网节点，客户端可加入你创建的房间</div>
+          <div class="cta">
+            <button class="btn btn-primary" onclick="showCreateRoom()">＋ 创建房间</button>
+            <button class="btn btn-outline" onclick="showJoinRoom()">⇥ 加入房间</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="connect-room" style="display:none;">
+        <div class="room-grid">
           <div class="card">
-            <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
-              <div class="game-icon" id="room-game-icon">🎮</div>
-              <div>
-                <div style="font-weight:600;font-size:16px;" id="room-game-name">-</div>
-                <div class="room-ip" id="room-ip">-</div>
+            <div class="card-title" id="room-title">房间 · 成员 <span class="sub" id="room-member-count"></span></div>
+            <div id="member-list"><div style="color:var(--text2);font-size:13px;padding:20px;text-align:center;">⏳ 等待成员加入…</div></div>
+          </div>
+          <div>
+            <div class="card">
+              <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+                <div class="game-icon" id="room-game-icon" style="width:46px;height:46px;">🎮</div>
+                <div>
+                  <div style="font-weight:600;font-size:16px;" id="room-game-name">-</div>
+                  <div class="room-ip" id="room-ip">-</div>
+                </div>
+              </div>
+              <div class="room-code" id="room-code">------</div>
+              <div style="display:flex;gap:10px;margin-top:14px;">
+                <button class="btn btn-primary" onclick="shareRoom()">分享</button>
+                <button class="btn btn-outline" onclick="copyRoomCode()">复制房间码</button>
+                <button class="btn btn-danger" style="margin-left:auto;" onclick="leaveRoom()">离开</button>
               </div>
             </div>
-            <div class="room-code" id="room-code">------</div>
-            <div style="display:flex;gap:10px;margin-top:12px;">
-              <button class="btn btn-outline btn-sm" onclick="copyShareUrl()">分享</button>
-              <button class="btn btn-danger btn-sm" onclick="leaveRoom()">离开</button>
+            <div class="card">
+              <div class="card-title">实时日志 <button class="btn btn-outline btn-sm" onclick="loadLogs()">刷新</button></div>
+              <div class="log-panel" id="log-panel">加载中…</div>
             </div>
-          </div>
-          <div class="card" style="margin-top:16px;">
-            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
-              实时日志
-              <button class="btn btn-outline btn-sm" onclick="loadLogs()">刷新</button>
-            </div>
-            <div class="log-panel" id="log-panel">加载中…</div>
           </div>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- ===== 服务器页 ===== -->
-  <div class="page" id="page-servers">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-      <div class="page-title" style="margin-bottom:0;">服务器</div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-outline btn-sm" onclick="pingAllServers()">测速</button>
-        <button class="btn btn-primary btn-sm" onclick="showAddServer()">＋ 添加</button>
+    <!-- ===== 服务器页 ===== -->
+    <div class="page" id="page-servers">
+      <div class="card">
+        <div class="card-title">中继服务器
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-outline btn-sm" onclick="pingAllServers()">⚡ 测速</button>
+            <button class="btn btn-primary btn-sm" onclick="showAddServer()">＋ 添加</button>
+          </div>
+        </div>
+        <div id="server-list"><div style="color:var(--text2);font-size:13px;padding:10px;">加载中…</div></div>
       </div>
     </div>
-    <div id="server-list"><div class="empty-state"><div class="icon">📡</div><div>加载中…</div></div></div>
-  </div>
 
-  <!-- ===== 设置页 ===== -->
-  <div class="page" id="page-settings">
-    <div class="page-title">设置</div>
-    <div class="settings-section">
-      <div class="settings-section-title">服务信息</div>
+    <!-- ===== 设置页 ===== -->
+    <div class="page" id="page-settings">
       <div class="card">
-        <div class="settings-row"><div><div class="settings-label">版本</div></div><div style="font-size:13px;color:var(--text2);" id="set-version">-</div></div>
+        <div class="card-title">服务信息</div>
+        <div class="settings-row"><div><div class="settings-label">服务版本</div></div><div style="font-size:13px;color:var(--text2);" id="set-version">-</div></div>
         <div class="settings-row"><div><div class="settings-label">EasyTier 版本</div></div><div style="font-size:13px;color:var(--text2);" id="set-et-version">-</div></div>
-        <div class="settings-row"><div><div class="settings-label">运行状态</div></div><div id="set-running"><span class="tag red">未运行</span></div></div>
+        <div class="settings-row"><div><div class="settings-label">运行状态</div></div><div id="set-running"><span class="tag" style="color:var(--danger);">未运行</span></div></div>
         <div class="settings-row"><div><div class="settings-label">虚拟 IP</div></div><div style="font-size:13px;color:var(--text2);" id="set-ip">-</div></div>
       </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-section-title">配置文件</div>
+
       <div class="card">
-        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
-          config.toml
-          <div>
-            <button class="btn btn-outline btn-sm" onclick="loadConfig()">读取</button>
-            <button class="btn btn-primary btn-sm" onclick="saveConfig()">保存并重启</button>
+        <div class="card-title">个人资料</div>
+        <div class="settings-row">
+          <div style="display:flex;align-items:center;gap:14px;">
+            <div class="member-avatar" id="settings-avatar" style="margin-right:0;">🎮</div>
+            <div><div class="settings-label" id="settings-nickname">服务器</div><div class="settings-desc">房间内展示的名称与图标</div></div>
           </div>
+          <button class="btn btn-primary btn-sm" onclick="openEditProfile()">编辑资料</button>
         </div>
-        <textarea id="config-editor" rows="12" style="font-family:monospace;font-size:12px;"></textarea>
       </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-section-title">进网凭据</div>
+
       <div class="card">
-        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
-          凭据列表
+        <div class="card-title">网络设置</div>
+        <div class="settings-row">
+          <div><div class="settings-label">禁用 P2P 打洞</div><div class="settings-desc">开启后节点间优先走中继转发，不尝试 P2P 直连（下次建房/加入时生效）</div></div>
+          <label class="switch"><input type="checkbox" id="disable-p2p" onchange="toggleP2p(this.checked)"><span class="slider"></span></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">配色方案 <span class="sub">昼间 5 种 · 夜间 5 种</span></div>
+        <div class="section-label">昼间（浅色）</div>
+        <div class="theme-grid" id="theme-light"></div>
+        <div class="divider"></div>
+        <div class="section-label">夜间（深色）</div>
+        <div class="theme-grid" id="theme-dark"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">进网凭据
           <button class="btn btn-primary btn-sm" onclick="createCredential()">生成凭据</button>
         </div>
         <div id="credential-list"><div style="color:var(--text2);font-size:13px;">需要实例运行后才能管理凭据</div></div>
       </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-section-title">实时日志</div>
-      <div class="card"><div class="log-panel" id="settings-log-panel">加载中…</div></div>
+
+      <div class="card">
+        <div class="card-title">配置文件 <span class="sub">config.toml</span>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-outline btn-sm" onclick="loadConfig()">读取</button>
+            <button class="btn btn-primary btn-sm" onclick="saveConfig()">保存并重启</button>
+          </div>
+        </div>
+        <textarea id="config-editor" rows="12"></textarea>
+      </div>
+
+      <div class="card">
+        <div class="card-title">实时日志</div>
+        <div class="log-panel" id="settings-log-panel">加载中…</div>
+      </div>
     </div>
   </div>
-
 </div>
 
 <!-- 创建房间弹窗 -->
@@ -291,7 +391,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
     <div class="modal-title">加入房间 <button class="modal-close" onclick="closeModal('modal-join-room')">✕</button></div>
     <div class="form-group">
       <input type="text" placeholder="邀请链接 / 短码 / AG1.离线串" id="join-input" style="font-size:13px;">
-      <div style="font-size:12px;color:var(--text2);margin-top:6px;">支持粘贴完整链接、6位短码、或 AG1. 开头的离线邀请串</div>
+      <div class="warn-note">支持完整链接、6 位短码、或 AG1. 开头的离线邀请串</div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal('modal-join-room')">取消</button>
@@ -305,7 +405,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
   <div class="modal">
     <div class="modal-title" id="server-modal-title">添加服务器 <button class="modal-close" onclick="closeModal('modal-server')">✕</button></div>
     <div class="form-group"><label class="form-label">名称</label><input type="text" id="server-name" placeholder="如：我的中继"></div>
-    <div class="form-group"><label class="form-label">地址</label><input type="text" id="server-uri" placeholder="tcp://1.2.3.4:11010 或 udp://…"><div style="font-size:12px;color:var(--text2);margin-top:4px;">须含协议前缀</div></div>
+    <div class="form-group"><label class="form-label">地址</label><input type="text" id="server-uri" placeholder="tcp://1.2.3.4:11010 或 udp://…"><div class="warn-note">须含协议前缀</div></div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal('modal-server')">取消</button>
       <button class="btn btn-primary" id="server-modal-save" onclick="doSaveServer()">添加</button>
@@ -315,10 +415,19 @@ input:focus, textarea:focus { border-color: var(--accent); }
 
 <!-- 编辑资料弹窗 -->
 <div class="modal-mask" id="modal-profile">
-  <div class="modal" style="width:360px;">
+  <div class="modal" style="width:420px;">
     <div class="modal-title">编辑资料 <button class="modal-close" onclick="closeModal('modal-profile')">✕</button></div>
-    <div style="text-align:center;margin-bottom:20px;"><div class="member-avatar" style="width:64px;height:64px;font-size:28px;margin:0 auto;" id="profile-avatar">服</div></div>
-    <div class="form-group"><label class="form-label">昵称</label><input type="text" id="profile-name" value="服务器"></div>
+    <div style="text-align:center;margin-bottom:18px;">
+      <div class="member-avatar" id="profile-avatar" style="width:72px;height:72px;font-size:34px;margin:0 auto;">🎮</div>
+      <div style="margin-top:10px;display:flex;gap:8px;justify-content:center;">
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('avatar-file').click()">上传头像</button>
+        <button class="btn btn-outline btn-sm" onclick="clearAvatar()">清除</button>
+      </div>
+      <input type="file" id="avatar-file" accept="image/*" style="display:none;" onchange="onAvatarFile(this)">
+    </div>
+    <div class="form-group"><label class="form-label">昵称</label><input type="text" id="profile-name" placeholder="请输入昵称"></div>
+    <div class="form-group"><label class="form-label">图标（无头像时显示）</label><div class="emoji-grid" id="emoji-grid"></div></div>
+    <div class="warn-note">昵称与头像会通过 peer-RPC 广播给房间内客户端；昵称写入 hostname，重建房间后生效。</div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal('modal-profile')">取消</button>
       <button class="btn btn-primary" onclick="saveProfile()">保存</button>
@@ -327,23 +436,100 @@ input:focus, textarea:focus { border-color: var(--accent); }
 </div>
 
 <script>
+/* ================= 登录验证 ================= */
+const CRED_KEY = 'astral_cred';
+function getCred(){ return localStorage.getItem(CRED_KEY) || ''; }
+function showLoginView(){ const v=document.getElementById('login-view'); if(v) v.classList.remove('hidden'); }
+function hideLoginView(){ const v=document.getElementById('login-view'); if(v) v.classList.add('hidden'); }
+function doLogin(e){
+  e.preventDefault();
+  const u = document.getElementById('login-username').value.trim();
+  const p = document.getElementById('login-password').value;
+  const err = document.getElementById('login-error');
+  if(!u || !p){ err.textContent = '请输入用户名和密码'; return; }
+  const cred = btoa(unescape(encodeURIComponent(u + ':' + p)));
+  fetch('/api/status', {headers:{'Authorization':'Basic '+cred}})
+    .then(r => {
+      if(r.ok){ localStorage.setItem(CRED_KEY, cred); hideLoginView(); initApp(); }
+      else { err.textContent = '用户名或密码错误'; }
+    })
+    .catch(()=>{ err.textContent = '无法连接服务器'; });
+}
+/* ================= 主题引擎 ================= */
+const DARK_BASE = {
+  '--bg':'#12121A','--bg-sidebar':'#181722','--bg-card':'#1E1D2B',
+  '--text':'#E5E7EB','--text2':'#9CA3AF','--border':'#2C2B3A',
+  '--success':'#34D399','--danger':'#F87171','--warning':'#FBBF24'
+};
+const THEMES = [
+  {id:'violet', name:'紫罗兰', dark:false, vars:{'--primary':'#8B5CF6','--primary-hover':'#7C3AED','--primary-soft':'#EDE9FE','--primary-softer':'#F5F3FF','--bg':'#F7F6FB','--bg-sidebar':'#FBFAFF','--bg-card':'#FFFFFF','--text':'#1F2937','--text2':'#6B7280','--border':'#E5E7EB','--success':'#10B981','--danger':'#EF4444','--warning':'#F59E0B'}},
+  {id:'blue', name:'晴空蓝', dark:false, vars:{'--primary':'#3B82F6','--primary-hover':'#2563EB','--primary-soft':'#DBEAFE','--primary-softer':'#EFF6FF','--bg':'#F5F8FC','--bg-sidebar':'#FAFBFE','--bg-card':'#FFFFFF','--text':'#1F2937','--text2':'#6B7280','--border':'#E5E7EB','--success':'#10B981','--danger':'#EF4444','--warning':'#F59E0B'}},
+  {id:'green', name:'翡翠绿', dark:false, vars:{'--primary':'#10B981','--primary-hover':'#059669','--primary-soft':'#D1FAE5','--primary-softer':'#ECFDF5','--bg':'#F3FBF7','--bg-sidebar':'#F9FDFB','--bg-card':'#FFFFFF','--text':'#1F2937','--text2':'#6B7280','--border':'#E5E7EB','--success':'#10B981','--danger':'#EF4444','--warning':'#F59E0B'}},
+  {id:'amber', name:'琥珀橙', dark:false, vars:{'--primary':'#F59E0B','--primary-hover':'#D97706','--primary-soft':'#FEF3C7','--primary-softer':'#FFFBEB','--bg':'#FBF8F1','--bg-sidebar':'#FEFCF7','--bg-card':'#FFFFFF','--text':'#1F2937','--text2':'#6B7280','--border':'#E5E7EB','--success':'#10B981','--danger':'#EF4444','--warning':'#F59E0B'}},
+  {id:'rose', name:'玫瑰粉', dark:false, vars:{'--primary':'#EC4899','--primary-hover':'#DB2777','--primary-soft':'#FCE7F3','--primary-softer':'#FDF2F8','--bg':'#FBF4F7','--bg-sidebar':'#FEFAFB','--bg-card':'#FFFFFF','--text':'#1F2937','--text2':'#6B7280','--border':'#E5E7EB','--success':'#10B981','--danger':'#EF4444','--warning':'#F59E0B'}},
+  {id:'violet-dark', name:'夜紫', dark:true, vars:{...DARK_BASE,'--primary':'#A78BFA','--primary-hover':'#8B5CF6','--primary-soft':'#32285C','--primary-softer':'#241E40'}},
+  {id:'blue-dark', name:'夜蓝', dark:true, vars:{...DARK_BASE,'--primary':'#60A5FA','--primary-hover':'#3B82F6','--primary-soft':'#1E2A45','--primary-softer':'#182238'}},
+  {id:'green-dark', name:'夜绿', dark:true, vars:{...DARK_BASE,'--primary':'#34D399','--primary-hover':'#10B981','--primary-soft':'#14352B','--primary-softer':'#112A23'}},
+  {id:'amber-dark', name:'夜橙', dark:true, vars:{...DARK_BASE,'--primary':'#FBBF24','--primary-hover':'#F59E0B','--primary-soft':'#3A2E16','--primary-softer':'#2C2312'}},
+  {id:'rose-dark', name:'夜粉', dark:true, vars:{...DARK_BASE,'--primary':'#F472B6','--primary-hover':'#EC4899','--primary-soft':'#3A1E32','--primary-softer':'#2C1826'}}
+];
+const THEME_KEY = 'astral_theme';
+function applyTheme(id) {
+  const t = THEMES.find(x=>x.id===id) || THEMES[0];
+  const root = document.documentElement;
+  for (const [k,v] of Object.entries(t.vars)) root.style.setProperty(k, v);
+  localStorage.setItem(THEME_KEY, id);
+  renderThemeOptions();
+}
+function renderThemeOptions() {
+  const cur = localStorage.getItem(THEME_KEY) || 'violet';
+  const light = document.getElementById('theme-light');
+  const dark = document.getElementById('theme-dark');
+  light.innerHTML = THEMES.filter(t=>!t.dark).map(t=>themeOptHtml(t,cur)).join('');
+  dark.innerHTML = THEMES.filter(t=>t.dark).map(t=>themeOptHtml(t,cur)).join('');
+}
+function themeOptHtml(t, cur) {
+  const cp = t.dark ? '#A78BFA' : '#8B5CF6';
+  const sw = `<i style="background:${t.vars['--primary']}"></i><i style="background:${t.vars['--primary-soft']}"></i><i style="background:${t.vars['--bg-card']};border:1px solid ${t.vars['--border']}"></i>`;
+  return `<div class="theme-opt ${t.id===cur?'active':''}" onclick="applyTheme('${t.id}')"><div class="theme-swatch">${sw}</div><div class="theme-name">${t.name}</div></div>`;
+}
+(function initTheme(){
+  const saved = localStorage.getItem(THEME_KEY) || 'violet';
+  const t = THEMES.find(x=>x.id===saved) || THEMES[0];
+  const root = document.documentElement;
+  for (const [k,v] of Object.entries(t.vars)) root.style.setProperty(k, v);
+})();
+
+/* ================= 图标选择 ================= */
+const ICONS = ['🎮','👾','🕹️','⛏️','🚗','🏭','🛶','⚔️','🐱','🐶','🐰','🦊','🐼','🐸','🦁','🐙','🧙','🎯','🎲','🧩','🌐','💻','🖥️','📡','⚙️','🚀'];
+let profile = { nickname:'服务器', icon:'🎮', disable_p2p:false, avatar:null };
+let pendingAvatar = null;
+let avatarDirty = false;
+
+/* ================= 状态 ================= */
 let currentPage = 'connect';
 let selectedGame = null;
 let games = [];
 let pollTimer = null;
 let editingServerId = null;
+let serverLatencies = {};
+let currentRoom = null;
+let shareUrl = '';
 
-// ===== 修复的 api 函数：正确处理非 JSON 响应 =====
+/* ================= API ================= */
 async function api(path, opts={}) {
-  const r = await fetch('/api'+path, {headers:{'Content-Type':'application/json'},...opts});
+  const cred = getCred();
+  const headers = {'Content-Type':'application/json'};
+  if (cred) headers['Authorization'] = 'Basic ' + cred;
+  const r = await fetch('/api'+path, {headers, ...opts});
+  if (r.status === 401) { localStorage.removeItem(CRED_KEY); showLoginView(); throw new Error('未登录或登录已过期'); }
   const text = await r.text();
   if (!r.ok) {
     try { const j = JSON.parse(text); throw new Error(j.error||r.statusText); }
     catch(e) { if(e instanceof SyntaxError) throw new Error(r.statusText||'请求失败'); throw e; }
   }
-  if(!text) return { ok: true };
-  try { return JSON.parse(text); }
-  catch(e) { return { ok: true, raw: text }; }
+  if(!text) return { ok:true };
+  try { return JSON.parse(text); } catch(e) { return { ok:true, raw:text }; }
 }
 
 function toast(msg, type='success') {
@@ -353,127 +539,295 @@ function toast(msg, type='success') {
   document.body.appendChild(t);
   setTimeout(()=>t.remove(), 3000);
 }
+function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+function showModal(id){ document.getElementById(id).classList.add('open'); }
+
+/* 健壮复制：navigator.clipboard 在非 HTTPS 下不可用，回退 execCommand */
+async function copyText(text) {
+  if (!text) { toast('没有可复制的内容','error'); return false; }
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch(e) {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok = document.execCommand('copy'); document.body.removeChild(ta);
+    return ok;
+  } catch(e) { return false; }
+}
+
+/* ================= 页面切换 ================= */
 function switchPage(name) {
   currentPage = name;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   document.querySelectorAll('.nav-item[data-page]').forEach(n=>n.classList.toggle('active', n.dataset.page===name));
   if(name==='servers') loadServers();
-  if(name==='settings') { loadSettings(); loadLogs('settings-log-panel'); }
+  if(name==='settings') { loadSettings(); loadLogs('settings-log-panel'); renderThemeOptions(); }
 }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-function showModal(id) { document.getElementById(id).classList.add('open'); }
-function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 
-// ===== 联机页 =====
+/* ================= 资料 ================= */
+function renderAvatar(el, base64, emoji) {
+  if (base64) {
+    el.innerHTML = '<img draggable="false" alt="">';
+    el.querySelector('img').src = 'data:image/png;base64,' + base64;
+  } else {
+    el.textContent = emoji || '🎮';
+  }
+}
+async function loadProfile() {
+  try {
+    const d = await api('/profile');
+    profile = { nickname:d.nickname||'服务器', icon:d.icon||'🎮', disable_p2p:!!d.disable_p2p, avatar:d.avatar||null };
+    applyProfileUI();
+  } catch(e) {}
+}
+function applyProfileUI() {
+  const name = profile.nickname || '服务器';
+  renderAvatar(document.getElementById('side-avatar'), profile.avatar, profile.icon);
+  document.getElementById('side-name').textContent = name;
+  renderAvatar(document.getElementById('top-avatar'), profile.avatar, profile.icon);
+  document.getElementById('top-greet').textContent = '你好，' + name;
+  document.getElementById('top-sub').textContent = '房间内将以此名称与图标展示';
+  renderAvatar(document.getElementById('settings-avatar'), profile.avatar, profile.icon);
+  document.getElementById('settings-nickname').textContent = name;
+  document.getElementById('disable-p2p').checked = profile.disable_p2p;
+}
+function openEditProfile() {
+  pendingAvatar = profile.avatar;
+  avatarDirty = false;
+  renderAvatar(document.getElementById('profile-avatar'), pendingAvatar, profile.icon);
+  document.getElementById('profile-name').value = profile.nickname;
+  document.getElementById('avatar-file').value = '';
+  renderEmojiGrid(profile.icon);
+  showModal('modal-profile');
+}
+function onAvatarFile(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  if (f.size > 512*1024) { toast('头像图片不能超过 512KB','error'); input.value=''; return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const base64 = String(reader.result).split(',')[1] || '';
+    pendingAvatar = base64; avatarDirty = true;
+    renderAvatar(document.getElementById('profile-avatar'), base64, profile.icon);
+  };
+  reader.readAsDataURL(f);
+}
+function clearAvatar() {
+  pendingAvatar = ''; avatarDirty = true;
+  renderAvatar(document.getElementById('profile-avatar'), null, profile.icon);
+  document.getElementById('avatar-file').value = '';
+}
+function renderEmojiGrid(active) {
+  const el = document.getElementById('emoji-grid');
+  el.innerHTML = ICONS.map(i=>`<div class="emoji-opt ${i===active?'active':''}" onclick="pickEmoji('${i}')">${i}</div>`).join('');
+}
+function pickEmoji(i) {
+  renderAvatar(document.getElementById('profile-avatar'), pendingAvatar, i);
+  document.getElementById('emoji-grid').querySelectorAll('.emoji-opt').forEach(e=>e.classList.toggle('active', e.textContent===i));
+  profile.icon = i;
+}
+async function saveProfile() {
+  const name = document.getElementById('profile-name').value.trim();
+  if (!name) return toast('昵称不能为空','error');
+  const body = { nickname:name, icon:profile.icon };
+  if (avatarDirty) body.avatar = pendingAvatar;
+  try {
+    await api('/profile',{method:'PUT',body:JSON.stringify(body)});
+    await loadProfile();
+    closeModal('modal-profile');
+    toast('资料已保存（重建房间后昵称生效）');
+  } catch(e){ toast(e.message,'error'); }
+}
+async function toggleP2p(checked) {
+  try {
+    const d = await api('/profile',{method:'PUT',body:JSON.stringify({disable_p2p:checked})});
+    profile.disable_p2p = d.disable_p2p;
+    toast(checked ? '已启用仅中继（禁用 P2P）' : '已恢复 P2P 打洞');
+  } catch(e){ document.getElementById('disable-p2p').checked = !checked; toast(e.message,'error'); }
+}
+
+/* ================= 联机 ================= */
+function gameEmoji(id){
+  const m = {minecraft:'⛏️',grand_theft_auto_v:'🚗',mindustry:'🏭',raft:'🛶',forged_alliance:'⚔️',valheim:'❄️',ark:'🦖',dont_starve_together:'🍖',factorio:'🏭',left_4_dead_2:'🧟',palworld:'🐺',project_zomboid:'🧟',rust:'🏔️',satisfactory:'🏭',seven_days_to_die:'🧟',stardew_valley:'🌾',terraria:'⛏️',v_rising:'🧛',custom:'🔧'};
+  return m[id]||'🎮';
+}
+function gameIconInner(g) {
+  const emoji = gameEmoji(g && g.id);
+  if (g && g.icon) {
+    return `<img src="${esc(g.icon)}" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:9px;" onerror="imgFail(this,'${emoji}')">`;
+  }
+  return emoji;
+}
+function imgFail(el, emoji) {
+  const span = document.createElement('span');
+  span.style.fontSize = '19px';
+  span.textContent = emoji;
+  el.replaceWith(span);
+}
 async function showCreateRoom() {
   showModal('modal-create-room');
-  if (!games.length) { const d = await api('/games'); games = d.games; renderGames(); }
+  if (!games.length) {
+    try { const d = await api('/games'); games = d.games || []; } catch(e){ toast(e.message,'error'); }
+  }
+  renderGames();
 }
 function renderGames() {
   const el = document.getElementById('game-list');
-  el.innerHTML = games.map(g=>`<div class="game-item ${selectedGame===g.id?'selected':''}" onclick="selectGame('${g.id}')"><div class="game-icon">${gameEmoji(g.id)}</div><div class="game-info"><div class="game-name">${g.name}</div><div class="game-desc">${g.description}</div></div>${selectedGame===g.id?'<div class="check">✓</div>':''}</div>`).join('');
+  el.innerHTML = games.map(g=>`<div class="game-item ${selectedGame===g.id?'selected':''}" onclick="selectGame('${g.id}')"><div class="game-icon">${gameIconInner(g)}</div><div class="game-info"><div class="game-name">${esc(g.name)}</div><div class="game-desc">${esc(g.description||'')}</div></div>${selectedGame===g.id?'<div class="check">✓</div>':''}</div>`).join('');
 }
-function gameEmoji(id){const m={minecraft:'⛏️',gta5:'🚗',mindustry:'🏭',raft:'🛶','supreme-commander':'⚔️',custom:'🔧'};return m[id]||'🎮';}
-function selectGame(id) { selectedGame=id; renderGames(); }
-function filterGames() {
-  const q = document.getElementById('game-search').value.toLowerCase();
-  document.querySelectorAll('.game-item').forEach(el=>{el.style.display=el.querySelector('.game-name').textContent.toLowerCase().includes(q)?'':'none';});
-}
+function selectGame(id){ selectedGame=id; renderGames(); }
+function filterGames(){ const q=document.getElementById('game-search').value.toLowerCase(); document.querySelectorAll('.game-item').forEach(el=>{ el.style.display = el.querySelector('.game-name').textContent.toLowerCase().includes(q)?'':'none'; }); }
 async function doCreateRoom() {
-  if (!selectedGame) return toast('请选择游戏','error');
+  if(!selectedGame) return toast('请选择游戏','error');
   const g = games.find(x=>x.id===selectedGame);
   try {
     const d = await api('/room/create',{method:'POST',body:JSON.stringify({game_id:g.id,game_name:g.name})});
-    if(d.ok) { closeModal('modal-create-room'); toast('房间创建成功'); showRoom(d.room,d.share_url); startPolling(); }
+    if(d.ok){ currentRoom = d.room; shareUrl = d.share_url||''; closeModal('modal-create-room'); toast('房间创建成功'); showRoomUI(); startPolling(); }
     else toast(d.error||'创建失败','error');
-  } catch(e) { toast(e.message,'error'); }
+  }catch(e){ toast(e.message,'error'); }
 }
-async function showJoinRoom() { document.getElementById('join-input').value=''; showModal('modal-join-room'); }
+function showJoinRoom(){ document.getElementById('join-input').value=''; showModal('modal-join-room'); }
 async function doJoinRoom() {
   const input = document.getElementById('join-input').value.trim();
   if(!input) return toast('请输入邀请链接或短码','error');
   try {
     const d = await api('/room/join',{method:'POST',body:JSON.stringify({input})});
-    if(d.ok) { closeModal('modal-join-room'); toast('已加入房间'); showRoom(d.room); startPolling(); }
+    if(d.ok){ currentRoom = d.room; shareUrl = d.share_url||''; closeModal('modal-join-room'); toast('已加入房间'); showRoomUI(); startPolling(); }
     else toast(d.error||'加入失败','error');
-  } catch(e) { toast(e.message,'error'); }
+  }catch(e){ toast(e.message,'error'); }
 }
-async function leaveRoom() {
-  try { await api('/room/leave',{method:'POST'}); toast('已离开房间'); showHome(); stopPolling(); } catch(e){toast(e.message,'error');}
+async function leaveRoom(){
+  try{ await api('/room/leave',{method:'POST'}); currentRoom=null; shareUrl=''; toast('已离开房间'); showHomeUI(); stopPolling(); }catch(e){ toast(e.message,'error'); }
 }
-function showHome() { document.getElementById('connect-home').style.display=''; document.getElementById('connect-room').style.display='none'; }
-function showRoom(room, shareUrl) {
+function showHomeUI(){ document.getElementById('connect-home').style.display=''; document.getElementById('connect-room').style.display='none'; }
+function showRoomUI(){
   document.getElementById('connect-home').style.display='none';
   document.getElementById('connect-room').style.display='';
-  document.getElementById('room-game-name').textContent = room.game_name;
-  document.getElementById('room-game-icon').textContent = gameEmoji(room.game_id);
-  let code = room.short_code || '------';
-  if(!room.short_code && room.offline_invite) code = room.offline_invite.slice(0,20)+'…';
+  if(!currentRoom) return;
+  document.getElementById('room-game-name').textContent = currentRoom.game_name;
+  const _g = games.find(x=>x.id===currentRoom.game_id);
+  document.getElementById('room-game-icon').innerHTML = gameIconInner(_g);
+  let code = currentRoom.short_code || '------';
+  if(!currentRoom.short_code && currentRoom.offline_invite) code = currentRoom.offline_invite.slice(0,20)+'…';
   document.getElementById('room-code').textContent = code;
-  window._shareUrl = shareUrl || '';
+  window._roomCode = currentRoom.short_code || currentRoom.offline_invite || '';
 }
-function copyShareUrl() {
-  const url = window._shareUrl;
-  if(!url) return toast('暂无分享链接','error');
-  navigator.clipboard.writeText(url).then(()=>toast('已复制到剪贴板'));
+async function shareRoom() {
+  if (!shareUrl) { try { const d = await api('/room/current'); shareUrl = d.share_url||''; } catch(e){} }
+  if (await copyText(shareUrl)) toast('邀请链接已复制');
+}
+async function copyRoomCode() {
+  const c = window._roomCode;
+  if (await copyText(c)) toast('房间码已复制');
+  else if (c) { prompt('复制以下房间码：', c); }
 }
 
-// ===== 节点状态轮询 =====
-function startPolling() { stopPolling(); pollTimer = setInterval(pollStatus, 3000); pollStatus(); }
-function stopPolling() { if(pollTimer){clearInterval(pollTimer);pollTimer=null;} }
-async function pollStatus() {
+/* ================= 成员轮询 ================= */
+function startPolling(){ stopPolling(); pollTimer = setInterval(pollStatus, 3000); pollStatus(); }
+function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
+function connLabel(c){
+  if(!c) return '未知';
+  const t = String(c);
+  if(t==='Local') return '本机';
+  if(t==='Relay') return '中转';
+  if(t==='P2P') return '直连';
+  return t;
+}
+function filterPublicNodes(nodes) {
+  // 对齐原版：hostname 以 PublicServer 开头的是中继/目录节点，不进成员列表
+  return (nodes||[]).filter(n => !(n.hostname||'').startsWith('PublicServer'));
+}
+async function pollStatus(){
   try {
     const d = await api('/status');
-    document.getElementById('room-ip').textContent = d.my_ipv4 || '-';
-    renderMembers(d.nodes||[]);
-  } catch(e){}
-}
-function renderMembers(nodes) {
-  const el = document.getElementById('member-list');
-  if(!nodes.length){el.innerHTML='<div class="empty-state"><div class="icon">⏳</div><div>等待成员加入…</div></div>';return;}
-  el.innerHTML = nodes.map(n=>`<div class="member-item"><div class="member-avatar">${esc((n.hostname||'？').slice(0,1))}</div><div class="member-info"><div class="member-name">${esc(n.hostname||'未知')}</div><div class="member-detail">${esc(n.ipv4||'')}</div><div class="member-tags"><span class="tag ${n.conn_type==='直连'?'green':''}">${esc(n.conn_type||'未知')}</span>${n.nat?`<span class="tag">${esc(n.nat)}</span>`:''}${n.version?`<span class="tag">${esc(n.version)}</span>`:''}</div></div><div class="member-latency">${n.latency_ms<0?'--':Math.round(n.latency_ms)+'ms'}</div></div>`).join('');
-}
-
-// ===== 服务器页 =====
-let serverLatencies = {};
-async function loadServers() {
-  try {
-    const d = await api('/servers');
-    renderServers(d.servers||[]);
-  } catch(e){toast(e.message,'error');}
-}
-function renderServers(list) {
-  const el = document.getElementById('server-list');
-  if(!list.length){el.innerHTML='<div class="empty-state"><div class="icon">📡</div><div>暂无服务器，点击右上角添加</div></div>';return;}
-  el.innerHTML = list.map(s=>{
-    const lat = serverLatencies[s.id];
-    let latClass='fail',latText='--ms';
-    if(lat!==undefined){
-      if(lat<0){latClass='fail';latText='超时';}
-      else if(lat<150){latClass='ok';latText=lat+'ms';}
-      else{latClass='slow';latText=lat+'ms';}
+    const ip = d.my_ipv4 || '-';
+    const mem = filterPublicNodes(d.nodes||[]);
+    document.getElementById('stat-ip').textContent = ip;
+    document.getElementById('stat-running').textContent = d.running ? '运行中' : '未运行';
+    document.getElementById('stat-running').style.color = d.running ? 'var(--success)' : 'var(--danger)';
+    document.getElementById('stat-members').textContent = mem.length;
+    if(currentRoom){
+      document.getElementById('room-ip').textContent = ip;
+      renderMembers(mem);
     }
-    return `<div class="server-item"><div class="server-latency ${latClass}"><div class="bar"></div>${latText}</div><div class="server-info"><div class="server-name">${esc(s.name)}</div><div class="server-uri">${esc(s.uri)}</div></div><label class="switch server-switch"><input type="checkbox" ${s.enabled?'checked':''} onchange="toggleServer(${s.id},this.checked)"><span class="slider"></span></label><div class="server-menu"><button class="btn-icon" onclick="showEditServer(${s.id})" title="编辑">✏️</button><button class="btn-icon" onclick="deleteServer(${s.id})" title="删除">🗑</button></div></div>`;
+    // 设置页的服务信息一并更新
+    if(document.getElementById('set-running')){
+      document.getElementById('set-running').innerHTML = d.running
+        ? '<span class="tag green">运行中</span>'
+        : '<span class="tag" style="color:var(--danger);">未运行</span>';
+      document.getElementById('set-ip').textContent = ip;
+      document.getElementById('set-et-version').textContent = d.easytier_version||'-';
+      document.getElementById('set-version').textContent = d.server_version||'-';
+    }
+  }catch(e){}
+}
+function renderMembers(nodes){
+  const el = document.getElementById('member-list');
+  document.getElementById('room-member-count').textContent = nodes.length ? `共 ${nodes.length} 人` : '';
+  if(!nodes.length){ el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:20px;text-align:center;">⏳ 等待成员加入…</div>'; return; }
+  el.innerHTML = nodes.map(n=>{
+    const isLocal = n.peer_id === 0 || connLabel(n.conn_type) === '本机';
+    const name = isLocal ? (profile.nickname||'本机') : (n.hostname||'未知');
+    const avatarHtml = isLocal
+      ? (profile.avatar
+          ? `<div class="member-avatar"><img src="data:image/png;base64,${profile.avatar}" alt=""></div>`
+          : `<div class="member-avatar">${profile.icon||'🎮'}</div>`)
+      : `<div class="member-avatar">${(n.hostname||'?').slice(0,1)}</div>`;
+    const localTag = isLocal ? '<span class="tag primary">本机</span>' : '';
+    const conn = connLabel(n.conn_type);
+    const connClass = conn==='直连' ? 'green' : (conn==='本机' ? 'primary' : '');
+    const tags = [
+      `<span class="tag ${connClass}">${esc(conn)}</span>`,
+      n.nat?`<span class="tag">${esc(n.nat)}</span>`:'',
+      n.version?`<span class="tag">${esc(n.version)}</span>`:''
+    ].join('');
+    const lat = n.latency_ms<0 ? '--' : Math.round(n.latency_ms)+'ms';
+    const ip = (n.ipv4||'').split('/')[0];
+    return `<div class="member-item">
+      ${avatarHtml}
+      <div class="member-info">
+        <div class="member-name">${esc(name)} ${localTag}</div>
+        <div class="member-detail">${esc(ip||'未分配 IP')}</div>
+        <div class="member-tags">${tags}</div>
+      </div>
+      <div class="member-latency">${lat}</div>
+    </div>`;
   }).join('');
 }
-async function pingAllServers() {
+
+/* ================= 服务器 ================= */
+async function loadServers(){ try{ const d = await api('/servers'); renderServers(d.servers||[]); }catch(e){ toast(e.message,'error'); } }
+function renderServers(list){
+  const el = document.getElementById('server-list');
+  if(!list.length){ el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:10px;">暂无服务器，点击右上角添加</div>'; return; }
+  el.innerHTML = list.map(s=>{
+    const lat = serverLatencies[s.id];
+    let latClass='fail', latText='--ms';
+    if(lat!==undefined){ if(lat<0){latClass='fail';latText='超时';} else if(lat<150){latClass='ok';latText=lat+'ms';} else {latClass='slow';latText=lat+'ms';} }
+    return `<div class="server-item">
+      <div class="server-latency ${latClass}"><div class="bar"></div>${latText}</div>
+      <div class="server-info"><div class="server-name">${esc(s.name)}</div><div class="server-uri">${esc(s.uri)}</div></div>
+      <label class="switch"><input type="checkbox" ${s.enabled?'checked':''} onchange="toggleServer(${s.id},this.checked)"><span class="slider"></span></label>
+      <div class="server-actions">
+        <button class="icon-btn" onclick="showEditServer(${s.id})" title="编辑">✏️</button>
+        <button class="icon-btn" onclick="deleteServer(${s.id})" title="删除">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function pingAllServers(){
   toast('正在测速…');
-  try {
-    const d = await api('/servers/ping');
-    serverLatencies = {};
-    (d.results||[]).forEach(r=>{serverLatencies[r.id]=r.latency_ms;});
-    loadServers();
-    toast('测速完成');
-  } catch(e){toast(e.message,'error');}
+  try{ const d = await api('/servers/ping'); serverLatencies = {}; (d.results||[]).forEach(r=>serverLatencies[r.id]=r.latency_ms); loadServers(); toast('测速完成'); }catch(e){ toast(e.message,'error'); }
 }
-async function toggleServer(id, enabled) {
-  try{await api(`/servers/${id}`,{method:'PUT',body:JSON.stringify({enabled})});}catch(e){toast(e.message,'error');loadServers();}
-}
-async function deleteServer(id) {
-  if(!confirm('确定删除该服务器？'))return;
-  try{await api(`/servers/${id}`,{method:'DELETE'});toast('已删除');loadServers();}catch(e){toast(e.message,'error');}
-}
+async function toggleServer(id,enabled){ try{ await api(`/servers/${id}`,{method:'PUT',body:JSON.stringify({enabled})}); }catch(e){ toast(e.message,'error'); loadServers(); } }
+async function deleteServer(id){ if(!confirm('确定删除该服务器？'))return; try{ await api(`/servers/${id}`,{method:'DELETE'}); toast('已删除'); loadServers(); }catch(e){ toast(e.message,'error'); } }
 function showAddServer(){
   editingServerId=null;
   document.getElementById('server-modal-title').innerHTML='添加服务器 <button class="modal-close" onclick="closeModal(\'modal-server\')">✕</button>';
@@ -483,97 +837,80 @@ function showAddServer(){
   showModal('modal-server');
 }
 function showEditServer(id){
-  const items=document.querySelectorAll('.server-item');
-  let server=null;
-  // 从 API 重新获取确保数据准确
   api('/servers').then(d=>{
-    server=(d.servers||[]).find(s=>s.id===id);
-    if(!server)return toast('服务器不存在','error');
+    const s=(d.servers||[]).find(x=>x.id===id);
+    if(!s) return toast('服务器不存在','error');
     editingServerId=id;
     document.getElementById('server-modal-title').innerHTML='编辑服务器 <button class="modal-close" onclick="closeModal(\'modal-server\')">✕</button>';
-    document.getElementById('server-name').value=server.name;
-    document.getElementById('server-uri').value=server.uri;
+    document.getElementById('server-name').value=s.name;
+    document.getElementById('server-uri').value=s.uri;
     document.getElementById('server-modal-save').textContent='保存';
     showModal('modal-server');
   });
 }
-async function doSaveServer() {
+async function doSaveServer(){
   const name=document.getElementById('server-name').value.trim();
   const uri=document.getElementById('server-uri').value.trim();
-  if(!name||!uri)return toast('请填写名称和地址','error');
+  if(!name||!uri) return toast('请填写名称和地址','error');
   try{
-    if(editingServerId){
-      await api(`/servers/${editingServerId}`,{method:'PUT',body:JSON.stringify({name,uri})});
-      toast('已保存');
-    }else{
-      await api('/servers',{method:'POST',body:JSON.stringify({name,uri})});
-      toast('已添加');
-    }
-    closeModal('modal-server');loadServers();
-  }catch(e){toast(e.message,'error');}
+    if(editingServerId){ await api(`/servers/${editingServerId}`,{method:'PUT',body:JSON.stringify({name,uri})}); toast('已保存'); }
+    else { await api('/servers',{method:'POST',body:JSON.stringify({name,uri})}); toast('已添加'); }
+    closeModal('modal-server'); loadServers();
+  }catch(e){ toast(e.message,'error'); }
 }
 
-// ===== 设置页 =====
-async function loadSettings() {
-  try {
-    const d = await api('/status');
-    document.getElementById('set-version').textContent = d.server_version||'-';
-    document.getElementById('set-et-version').textContent = d.easytier_version||'-';
-    document.getElementById('set-ip').textContent = d.my_ipv4||'-';
-    document.getElementById('set-running').innerHTML = d.running?'<span class="tag green">运行中</span>':'<span class="tag red">未运行</span>';
-    loadCredentials();
-  } catch(e){}
+/* ================= 设置 ================= */
+async function loadSettings(){
+  await loadProfile();
+  pollStatus();
+  loadCredentials();
 }
-async function loadConfig() {
-  try{const d=await api('/config');document.getElementById('config-editor').value=d.config;}catch(e){toast(e.message,'error');}
-}
-async function saveConfig() {
+async function loadConfig(){ try{ const d=await api('/config'); document.getElementById('config-editor').value=d.config; }catch(e){ toast(e.message,'error'); } }
+async function saveConfig(){
   const config=document.getElementById('config-editor').value;
-  try{await api('/config',{method:'PUT',body:JSON.stringify({config,restart:true})});toast('已保存并重启');loadSettings();}catch(e){toast(e.message,'error');}
+  try{ await api('/config',{method:'PUT',body:JSON.stringify({config,restart:true})}); toast('已保存并重启'); loadSettings(); }catch(e){ toast(e.message,'error'); }
 }
-async function loadCredentials() {
-  try{const d=await api('/credentials');renderCredentials(d.credentials||[]);}catch(e){}
-}
-function renderCredentials(list) {
+async function loadCredentials(){ try{ const d=await api('/credentials'); renderCredentials(d.credentials||[]); }catch(e){} }
+function renderCredentials(list){
   const el=document.getElementById('credential-list');
-  if(!list.length){el.innerHTML='<div style="color:var(--text2);font-size:13px;">暂无凭据</div>';return;}
-  el.innerHTML=list.map(c=>`<div class="settings-row"><div><div class="settings-label">${esc(c.credential_id||'')}</div><div class="settings-desc">过期: ${c.expiry_unix?new Date(c.expiry_unix*1000).toLocaleString():'-'} · ${c.reusable?'可复用':'单次'}</div></div><button class="btn btn-danger btn-sm" onclick="revokeCredential('${c.credential_id}')">撤销</button></div>`).join('');
+  if(!list.length){ el.innerHTML='<div style="color:var(--text2);font-size:13px;">暂无凭据</div>'; return; }
+  el.innerHTML=list.map(c=>`<div class="settings-row"><div><div class="settings-label">${esc(c.credential_id||'')}</div><div class="settings-desc">过期: ${c.expiry_unix?new Date(c.expiry_unix*1000).toLocaleString():'-'} · ${c.reusable?'可复用':'单次'}</div></div><button class="btn btn-danger btn-sm" onclick="revokeCredential('${esc(c.credential_id)}')">撤销</button></div>`).join('');
 }
-async function createCredential() {
-  try{const d=await api('/credentials',{method:'POST',body:JSON.stringify({ttl_seconds:86400*30,reusable:true})});toast('凭据已生成');loadCredentials();}catch(e){toast(e.message,'error');}
-}
-async function revokeCredential(id) {
-  if(!confirm('确定撤销该凭据？'))return;
-  try{await api(`/credentials/${id}`,{method:'DELETE'});toast('已撤销');loadCredentials();}catch(e){toast(e.message,'error');}
-}
+async function createCredential(){ try{ await api('/credentials',{method:'POST',body:JSON.stringify({ttl_seconds:86400*30,reusable:true})}); toast('凭据已生成'); loadCredentials(); }catch(e){ toast(e.message,'error'); } }
+async function revokeCredential(id){ if(!confirm('确定撤销该凭据？'))return; try{ await api(`/credentials/${id}`,{method:'DELETE'}); toast('已撤销'); loadCredentials(); }catch(e){ toast(e.message,'error'); } }
 
-// ===== 日志 =====
-async function loadLogs(panelId) {
+/* ================= 日志 ================= */
+async function loadLogs(panelId){
   const pid = panelId||'log-panel';
   try {
     const d = await api('/logs?tail=100');
     const logs = d.logs||[];
     const el = document.getElementById(pid);
-    if(!logs.length){el.innerHTML='<span style="color:#666;">暂无日志</span>';return;}
-    el.innerHTML = logs.map(l=>{const t=l.ts?new Date(l.ts*1000).toLocaleTimeString():'';return `<div><span class="log-time">${t}</span><span class="log-${l.level||'info'}">[${l.level||'info'}]</span> ${esc(l.msg||'')}</div>`;}).join('');
+    if(!el) return;
+    if(!logs.length){ el.innerHTML='<span style="color:#666;">暂无日志</span>'; return; }
+    el.innerHTML = logs.map(l=>{ const t=l.ts?new Date(l.ts*1000).toLocaleTimeString():''; return `<div><span class="log-time">${t}</span><span class="log-${l.level||'info'}">[${l.level||'info'}]</span> ${esc(l.msg||'')}</div>`; }).join('');
     el.scrollTop = el.scrollHeight;
+  }catch(e){}
+}
+
+function refreshAll(){ loadProfile(); pollStatus(); if(currentRoom) loadLogs(); }
+
+/* ================= 初始化 ================= */
+(async function initApp(){
+  renderThemeOptions();
+  if (!getCred()) { showLoginView(); return; }
+  try { await api('/status'); } catch(e) { return; }
+  hideLoginView();
+  try {
+    const g = await api('/games');
+    games = g.games || [];
+    document.getElementById('stat-games').textContent = games.length;
   } catch(e){}
-}
-
-// ===== 资料 =====
-function editProfile(){showModal('modal-profile');}
-function saveProfile(){
-  const name=document.getElementById('profile-name').value.trim();
-  if(!name)return toast('昵称不能为空','error');
-  document.getElementById('profile-avatar').textContent=name.slice(0,1);
-  closeModal('modal-profile');toast('已保存（重启实例后生效）');
-}
-
-// ===== 初始化 =====
-(async function init(){
+  await loadProfile();
+  pollStatus();
   try {
     const d = await api('/room/current');
-    if(d.room){showRoom(d.room,d.share_url);startPolling();}
+    if(d.room){ currentRoom = d.room; shareUrl = d.share_url||''; showRoomUI(); startPolling(); }
   } catch(e){}
 })();
 </script>

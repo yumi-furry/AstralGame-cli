@@ -1,7 +1,5 @@
 //! REST API 处理器：房间、服务器、节点状态。
 
-use std::sync::Arc;
-
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -22,7 +20,7 @@ fn err(status: StatusCode, msg: impl Into<String>) -> Response {
 
 // ---------- 节点状态 / 日志 ----------
 
-pub async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.node.snapshot())
 }
 
@@ -32,14 +30,14 @@ pub struct LogsQuery {
 }
 
 pub async fn logs(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     Query(q): Query<LogsQuery>,
 ) -> impl IntoResponse {
     let tail = q.tail.unwrap_or(200).min(800);
     Json(json!({ "logs": state.node.logs(tail) }))
 }
 
-pub async fn get_config(State(state): State<Arc<AppState>>) -> Response {
+pub async fn get_config(State(state): State<AppState>) -> Response {
     match std::fs::read_to_string(&state.config_path) {
         Ok(raw) => Json(json!({ "config": raw, "path": state.config_path.to_string_lossy() }))
             .into_response(),
@@ -48,11 +46,92 @@ pub async fn get_config(State(state): State<Arc<AppState>>) -> Response {
 }
 
 #[derive(Deserialize)]
+pub struct PutProfileRequest {
+    nickname: Option<String>,
+    icon: Option<String>,
+    disable_p2p: Option<bool>,
+    /// 头像图片 base64（None=不改；空串=清除；否则更新为图片）
+    avatar: Option<String>,
+}
+
+pub async fn get_profile(State(state): State<AppState>) -> impl IntoResponse {
+    let cfg = state.server_config.read().unwrap();
+    let avatar = crate::store::load_avatar().map(|bytes| {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    });
+    Json(json!({
+        "nickname": cfg.nickname,
+        "icon": cfg.icon,
+        "disable_p2p": cfg.disable_p2p,
+        "avatar": avatar,
+    }))
+}
+
+pub async fn put_profile(
+    State(state): State<AppState>,
+    Json(req): Json<PutProfileRequest>,
+) -> Response {
+    {
+        let mut cfg = state.server_config.write().unwrap();
+        if let Some(n) = req.nickname {
+            let n = n.trim().to_string();
+            if n.is_empty() {
+                return err(StatusCode::BAD_REQUEST, "昵称不能为空");
+            }
+            cfg.nickname = n;
+        }
+        if let Some(i) = req.icon {
+            let i = i.trim().to_string();
+            if !i.is_empty() {
+                cfg.icon = i;
+            }
+        }
+        if let Some(d) = req.disable_p2p {
+            cfg.disable_p2p = d;
+        }
+    }
+
+    if let Some(avatar_b64) = req.avatar {
+        let b64 = avatar_b64.trim().to_string();
+        if b64.is_empty() {
+            if let Err(e) = crate::store::delete_avatar() {
+                return err(StatusCode::INTERNAL_SERVER_ERROR, format!("清除头像失败: {e}"));
+            }
+        } else {
+            use base64::Engine;
+            let bytes = match base64::engine::general_purpose::STANDARD.decode(&b64) {
+                Ok(b) => b,
+                Err(_) => return err(StatusCode::BAD_REQUEST, "头像 base64 无效"),
+            };
+            if bytes.len() > 512 * 1024 {
+                return err(StatusCode::BAD_REQUEST, "头像图片不能超过 512KB");
+            }
+            if let Err(e) = crate::store::save_avatar(&bytes) {
+                return err(StatusCode::INTERNAL_SERVER_ERROR, format!("保存头像失败: {e}"));
+            }
+        }
+    }
+
+    let cfg = state.server_config.read().unwrap();
+    if let Err(e) = crate::config::save(&state.config_path, &cfg) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, format!("保存配置失败: {e}"));
+    }
+    Json(json!({
+        "ok": true,
+        "nickname": cfg.nickname,
+        "icon": cfg.icon,
+        "disable_p2p": cfg.disable_p2p,
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
 pub struct StartRequest {
     config: Option<String>,
 }
 
-pub async fn start(State(state): State<Arc<AppState>>, Json(req): Json<StartRequest>) -> Response {
+pub async fn start(State(state): State<AppState>, Json(req): Json<StartRequest>) -> Response {
     let toml = match req.config {
         Some(cfg) => match crate::config::parse(&cfg) {
             Ok(p) => p.instance_toml,
@@ -75,12 +154,12 @@ pub async fn start(State(state): State<Arc<AppState>>, Json(req): Json<StartRequ
     }
 }
 
-pub async fn stop(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn stop(State(state): State<AppState>) -> impl IntoResponse {
     state.node.stop().await;
     Json(json!({ "ok": true }))
 }
 
-pub async fn restart(State(state): State<Arc<AppState>>) -> Response {
+pub async fn restart(State(state): State<AppState>) -> Response {
     match state.node.restart().await {
         Ok(id) => Json(json!({ "ok": true, "instance_id": id })).into_response(),
         Err(e) => {
@@ -96,7 +175,7 @@ pub struct PutConfigRequest {
 }
 
 pub async fn put_config(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     Json(req): Json<PutConfigRequest>,
 ) -> Response {
     let parsed = match crate::config::parse(&req.config) {
@@ -135,7 +214,7 @@ fn default_reusable() -> bool {
 }
 
 pub async fn create_credential(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     Json(req): Json<CreateCredentialRequest>,
 ) -> Response {
     match state.node.generate_credential(req.ttl_seconds, req.reusable).await {
@@ -144,7 +223,7 @@ pub async fn create_credential(
     }
 }
 
-pub async fn list_credentials(State(state): State<Arc<AppState>>) -> Response {
+pub async fn list_credentials(State(state): State<AppState>) -> Response {
     match state.node.list_credentials().await {
         Ok(c) => Json(json!({ "credentials": c })).into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, e),
@@ -152,7 +231,7 @@ pub async fn list_credentials(State(state): State<Arc<AppState>>) -> Response {
 }
 
 pub async fn revoke_credential(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
     match state.node.revoke_credential(id).await {
@@ -172,7 +251,7 @@ pub struct CreateRoomRequest {
 }
 
 pub async fn create_room(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     Json(req): Json<CreateRoomRequest>,
 ) -> Response {
     let servers = store::load_servers();
@@ -217,7 +296,8 @@ pub async fn create_room(
         peers: payload.peers.clone(),
     };
 
-    let toml = build_room_toml(&room);
+    let (hostname, disable_p2p) = room_template_params(&state);
+    let toml = build_room_toml(&room, &hostname, disable_p2p);
     match state.node.start(toml).await {
         Ok(id) => {
             *state.current_room.lock().unwrap() = Some(room.clone());
@@ -239,7 +319,7 @@ pub struct JoinRoomRequest {
 }
 
 pub async fn join_room(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     Json(req): Json<JoinRoomRequest>,
 ) -> Response {
     let input = req.input.trim();
@@ -266,7 +346,8 @@ pub async fn join_room(
         peers: payload.peers.clone(),
     };
 
-    let toml = build_room_toml(&room);
+    let (hostname, disable_p2p) = room_template_params(&state);
+    let toml = build_room_toml(&room, &hostname, disable_p2p);
     match state.node.start(toml).await {
         Ok(id) => {
             *state.current_room.lock().unwrap() = Some(room.clone());
@@ -274,6 +355,10 @@ pub async fn join_room(
                 "ok": true,
                 "instance_id": id,
                 "room": room,
+                "share_url": invite::build_join_url(
+                    room.short_code.as_deref(),
+                    room.offline_invite.as_deref(),
+                ),
             }))
             .into_response()
         }
@@ -281,13 +366,13 @@ pub async fn join_room(
     }
 }
 
-pub async fn leave_room(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn leave_room(State(state): State<AppState>) -> impl IntoResponse {
     state.node.stop().await;
     *state.current_room.lock().unwrap() = None;
     Json(json!({ "ok": true }))
 }
 
-pub async fn current_room(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn current_room(State(state): State<AppState>) -> impl IntoResponse {
     let room = state.current_room.lock().unwrap().clone();
     match room {
         Some(r) => {
@@ -298,14 +383,14 @@ pub async fn current_room(State(state): State<Arc<AppState>>) -> impl IntoRespon
     }
 }
 
-fn build_room_toml(room: &crate::models::ActiveRoom) -> String {
+fn build_room_toml(room: &crate::models::ActiveRoom, hostname: &str, disable_p2p: bool) -> String {
     let mut s = String::new();
     s.push_str("instance_name = \"astral-server\"\n");
-    s.push_str("hostname = \"astral-server\"\n");
+    s.push_str(&format!("hostname = \"{}\"\n", tml_escape(hostname)));
     s.push_str("dhcp = true\n");
     s.push_str("listeners = [\n");
-    s.push_str("    \"tcp://0.0.0.0:11010\",\n");
-    s.push_str("    \"udp://0.0.0.0:11010\",\n");
+    s.push_str("    \"tcp://0.0.0.0:0\",\n");
+    s.push_str("    \"udp://0.0.0.0:0\",\n");
     s.push_str("]\n\n");
     s.push_str("[network_identity]\n");
     s.push_str(&format!("network_name = \"{}\"\n", room.network_name));
@@ -316,9 +401,28 @@ fn build_room_toml(room: &crate::models::ActiveRoom) -> String {
         s.push_str(&format!("uri = \"{}\"\n", p.uri));
     }
     s.push_str("\n[flags]\n");
+    s.push_str(&format!("disable_p2p = {disable_p2p}\n"));
+    // 与原版客户端对齐：压缩算法、KCP/QUIC 入站与中继开关。
+    s.push_str("data_compress_algo = 2\n");
     s.push_str("default_protocol = \"tcp\"\n");
     s.push_str("dev_name = \"astral0\"\n");
+    s.push_str("disable_kcp_input = true\n");
+    s.push_str("disable_relay_kcp = true\n");
+    s.push_str("enable_relay_foreign_network_kcp = false\n");
+    s.push_str("disable_quic_input = true\n");
+    s.push_str("disable_relay_quic = true\n");
+    s.push_str("enable_relay_foreign_network_quic = false\n");
     s
+}
+
+fn tml_escape(s: &str) -> String {
+    s.replace('\\', r"\\").replace('"', r#"\""#)
+}
+
+/// 读取当前昵称（hostname）与是否禁用 P2P，用于构建房间 TOML。
+fn room_template_params(state: &AppState) -> (String, bool) {
+    let cfg = state.server_config.read().unwrap();
+    (cfg.nickname.clone(), cfg.disable_p2p)
 }
 
 async fn try_create_short_code(payload: &RoomInvitePayload) -> anyhow::Result<String> {
@@ -579,12 +683,25 @@ pub async fn delete_server(Path(id): Path<u64>) -> Response {
 pub async fn list_games() -> impl IntoResponse {
     Json(json!({
         "games": [
-            { "id": "minecraft", "name": "我的世界", "description": "开局域网世界，客人在本机游戏列表加入" },
-            { "id": "gta5", "name": "侠盗猎车手5", "description": "同时支持传承版和增强版以及跨平台联机" },
-            { "id": "mindustry", "name": "Mindustry", "description": "塔防+工厂建设沙盒" },
-            { "id": "raft", "name": "木筏求生", "description": "海上生存建造" },
-            { "id": "supreme-commander", "name": "最高指挥官：钢铁联盟", "description": "RTS 经典" },
-            { "id": "custom", "name": "自定义", "description": "手动填写网络名与密钥" },
+            { "id": "minecraft", "name": "我的世界", "description": "开局域网世界，客人在本机游戏列表加入", "icon": "https://next.astral.fan/games/minecraft/icon.png" },
+            { "id": "grand_theft_auto_v", "name": "侠盗猎车手5", "description": "同时支持传承版和增强版以及跨平台联机", "icon": "https://next.astral.fan/games/grand_theft_auto_v/icon.png" },
+            { "id": "mindustry", "name": "Mindustry", "description": "塔防 + 工厂建设沙盒", "icon": "https://next.astral.fan/games/mindustry/icon.png" },
+            { "id": "raft", "name": "木筏求生", "description": "海上生存建造", "icon": "https://next.astral.fan/games/raft/icon.png" },
+            { "id": "forged_alliance", "name": "最高指挥官：钢铁联盟", "description": "RTS 经典", "icon": "https://next.astral.fan/games/forged_alliance/icon.png" },
+            { "id": "valheim", "name": "英灵神殿", "description": "维京生存合作", "icon": "https://next.astral.fan/games/valheim/icon.png" },
+            { "id": "ark", "name": "方舟：生存进化", "description": "恐龙生存沙盒", "icon": "https://next.astral.fan/games/ark/icon.png" },
+            { "id": "dont_starve_together", "name": "饥荒联机版", "description": "荒野生存合作", "icon": "https://next.astral.fan/games/dont_starve_together/icon.png" },
+            { "id": "factorio", "name": "异星工厂", "description": "自动化工厂建设", "icon": "https://next.astral.fan/games/factorio/icon.png" },
+            { "id": "left_4_dead_2", "name": "求生之路2", "description": "合作求生射击", "icon": "https://next.astral.fan/games/left_4_dead_2/icon.png" },
+            { "id": "palworld", "name": "幻兽帕鲁", "description": "帕鲁收集与生存", "icon": "https://next.astral.fan/games/palworld/icon.png" },
+            { "id": "project_zomboid", "name": "僵尸毁灭工程", "description": "僵尸生存沙盒", "icon": "https://next.astral.fan/games/project_zomboid/icon.png" },
+            { "id": "rust", "name": "腐蚀", "description": "多人生存建造", "icon": "https://next.astral.fan/games/rust/icon.png" },
+            { "id": "satisfactory", "name": "幸福工厂", "description": "第一人称工厂建设", "icon": "https://next.astral.fan/games/satisfactory/icon.png" },
+            { "id": "seven_days_to_die", "name": "七日杀", "description": "僵尸生存建造", "icon": "https://next.astral.fan/games/seven_days_to_die/icon.png" },
+            { "id": "stardew_valley", "name": "星露谷物语", "description": "农场经营合作", "icon": "https://next.astral.fan/games/stardew_valley/icon.png" },
+            { "id": "terraria", "name": "泰拉瑞亚", "description": "2D 沙盒冒险", "icon": "https://next.astral.fan/games/terraria/icon.png" },
+            { "id": "v_rising", "name": "夜族崛起", "description": "吸血鬼生存建造", "icon": "https://next.astral.fan/games/v_rising/icon.png" },
+            { "id": "custom", "name": "自定义", "description": "手动填写网络名与密钥", "icon": "" },
         ]
     }))
 }

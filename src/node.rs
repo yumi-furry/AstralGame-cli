@@ -17,6 +17,7 @@ use easytier::proto::api::instance::{
 use easytier::proto::rpc_types::controller::BaseController;
 use easytier::rpc_service::InstanceRpcService;
 
+use crate::config::ServerConfig;
 use crate::status::{self, NetworkStatus};
 
 const LOG_CAP: usize = 800;
@@ -77,16 +78,20 @@ pub struct NodeRuntime {
     toml: Mutex<Option<String>>,
     logs: Arc<Mutex<VecDeque<LogEntry>>>,
     snapshot: Arc<RwLock<Snapshot>>,
+    profile: Arc<RwLock<ServerConfig>>,
+    rpc_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl NodeRuntime {
-    pub fn new() -> Arc<Self> {
+    pub fn new(profile: Arc<RwLock<ServerConfig>>) -> Arc<Self> {
         Arc::new(Self {
             manager: Arc::new(NetworkInstanceManager::new()),
             current_id: Mutex::new(None),
             toml: Mutex::new(None),
             logs: Arc::new(Mutex::new(VecDeque::new())),
             snapshot: Arc::new(RwLock::new(Snapshot::idle())),
+            profile,
+            rpc_task: Mutex::new(None),
         })
     }
 
@@ -124,6 +129,7 @@ impl NodeRuntime {
             });
         }
 
+        self.spawn_app_rpc(id).await;
         self.spawn_poll(id).await;
         Ok(id.to_string())
     }
@@ -158,7 +164,49 @@ impl NodeRuntime {
         });
     }
 
+    /// 订阅应用层 peer-RPC 入站事件，响应客户端 `user.getInfo`（广播昵称/头像）。
+    async fn spawn_app_rpc(&self, id: Uuid) {
+        let service = {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                match easytier::peers::astral_app_rpc::get_service(&id) {
+                    Some(s) => break s,
+                    None if std::time::Instant::now() >= deadline => {
+                        self.push_log("warn", "app rpc 服务未就绪，头像广播暂不可用");
+                        return;
+                    }
+                    None => tokio::time::sleep(Duration::from_millis(50)).await,
+                }
+            }
+        };
+
+        let mut rx = service.subscribe_inbound();
+        let profile = self.profile.clone();
+        let handle = tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(easytier::peers::astral_app_rpc::AppInboundEvent::Call {
+                        channel,
+                        token,
+                        payload,
+                        ..
+                    }) => {
+                        crate::peer_rpc::handle_call(&service, channel, token, payload, &profile)
+                            .await;
+                    }
+                    Ok(_) => {} // Notify：忽略
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                }
+            }
+        });
+        *self.rpc_task.lock().unwrap() = Some(handle);
+    }
+
     pub async fn stop(&self) {
+        if let Some(h) = self.rpc_task.lock().unwrap().take() {
+            h.abort();
+        }
         let id = { self.current_id.lock().unwrap().take() };
         if let Some(id) = id {
             if let Err(e) = self.manager.delete_network_instance(vec![id]) {

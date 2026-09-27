@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
-    extract::State,
     http::{header, HeaderMap, Method, StatusCode},
     middleware::Next,
     response::{Html, IntoResponse, Json, Response},
@@ -17,18 +16,20 @@ use crate::config::ServerConfig;
 use crate::models::ActiveRoom;
 use crate::node::NodeRuntime;
 
+#[derive(Clone)]
 pub struct AppState {
     pub node: Arc<NodeRuntime>,
     pub config_path: PathBuf,
-    pub server_config: Arc<ServerConfig>,
+    pub server_config: Arc<std::sync::RwLock<ServerConfig>>,
     pub current_room: Arc<std::sync::Mutex<Option<ActiveRoom>>>,
 }
 
-pub fn build_router(state: Arc<AppState>) -> Router {
+pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
         // 节点状态 / 日志 / 配置
         .route("/status", get(crate::api::status))
         .route("/logs", get(crate::api::logs))
+        .route("/profile", get(crate::api::get_profile).put(crate::api::put_profile))
         .route("/config", get(crate::api::get_config).put(crate::api::put_config))
         .route("/start", post(crate::api::start))
         .route("/stop", post(crate::api::stop))
@@ -51,14 +52,19 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         // 游戏列表
         .route("/games", get(crate::api::list_games));
 
+    let mw_state = state.clone();
+    let protected_api = api.route_layer(axum::middleware::from_fn(
+        move |request: axum::extract::Request, next: Next| {
+            let s = mw_state.clone();
+            async move { auth_middleware(s, request, next).await }
+        },
+    ));
+
+    // `/` 与 fallback 直接返回前端页面（不鉴权），登录验证由前端 login 视图 + /api 鉴权完成。
     Router::new()
         .route("/", get(serve_index))
-        .nest("/api", api)
         .fallback(fallback_handler)
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            auth_middleware,
-        ))
+        .nest("/api", protected_api)
         .with_state(state)
 }
 
@@ -107,21 +113,22 @@ fn auth_ok(cfg: &ServerConfig, headers: &HeaderMap) -> bool {
 }
 
 fn unauthorized() -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        [(header::WWW_AUTHENTICATE, "Basic realm=\"astral-server\"")],
-        "Unauthorized",
-    )
-        .into_response()
+    (StatusCode::UNAUTHORIZED, Json(json!({ "error": "unauthorized" }))).into_response()
 }
 
 async fn auth_middleware(
-    State(state): State<Arc<AppState>>,
+    state: AppState,
     request: axum::extract::Request,
     next: Next,
 ) -> Response {
-    if !auth_required(&state.server_config) || auth_ok(&state.server_config, request.headers()) {
-        return next.run(request).await;
+    // 在 await 之前释放读锁（RwLockReadGuard 非 Send，不能跨 await 存活）。
+    let allowed = {
+        let cfg = state.server_config.read().unwrap();
+        !auth_required(&cfg) || auth_ok(&cfg, request.headers())
+    };
+    if allowed {
+        next.run(request).await
+    } else {
+        unauthorized()
     }
-    unauthorized()
 }

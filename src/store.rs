@@ -44,3 +44,27 @@ fn default_servers() -> Vec<ServerEntry> {
         sort_order: 0,
     }]
 }
+
+fn avatar_path() -> PathBuf {
+    exe_dir().join("avatar.bin")
+}
+
+/// 读取头像原始字节；未设置/为空时返回 None。
+pub fn load_avatar() -> Option<Vec<u8>> {
+    fs::read(avatar_path()).ok().filter(|b| !b.is_empty())
+}
+
+/// 写入头像原始字节。
+pub fn save_avatar(bytes: &[u8]) -> Result<()> {
+    fs::write(avatar_path(), bytes).context("写入头像 avatar.bin 失败")?;
+    Ok(())
+}
+
+/// 删除头像文件。
+pub fn delete_avatar() -> Result<()> {
+    let p = avatar_path();
+    if p.exists() {
+        fs::remove_file(&p).context("删除头像 avatar.bin 失败")?;
+    }
+    Ok(())
+}

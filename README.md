@@ -1,6 +1,6 @@
 # Astral Game P2P Server (CLI + Web 管理端)
 
-基于 EasyTier 开发的服务器版 Astral 联机工具，适配 Debian/Ubuntu 无头服务器。内置 Web 管理界面，可通过浏览器管理服务器、创建/加入房间。
+基于 EasyTier 开发的服务器版 Astral 联机工具，适配 Debian/Ubuntu 无头服务器。内置 Web 管理界面，可通过浏览器管理服务器、创建/加入房间。当前版本 **2.0.0**。
 
 ---
 
@@ -162,14 +162,25 @@ web_port = 1786         # 监听端口
 username = "admin"      # 登录用户名（留空则不鉴权）
 password = "yourpass"   # 登录密码
 log_level = "info"      # 日志级别：trace / debug / info / warn / error
+nickname = "astral-server"  # 房间内展示昵称（写入 hostname，对端客户端可见）
+icon = "🎮"                 # 本机图标（emoji，无头像图片时显示）
+disable_p2p = false         # 是否禁用 P2P 打洞（开启后仅走中继）
 ```
 
 其余部分为标准 EasyTier 配置，会原样传给内核。
+
+> 头像为可选的真实图片，上传后保存为可执行文件同目录下的 `avatar.bin`，
+> 通过 peer-RPC 的 `user.getInfo` 广播给房间内的客户端。
 
 ---
 
 ## 功能说明
 
 - **联机**：创建房间 / 加入房间（支持短码、AG1. 离线串、完整链接）
+- **成员**：房间内成员列表自动过滤中继节点，仅显示真实用户；本机标记「本机」
+- **编辑资料**：自定义昵称、emoji 图标、上传头像图片；昵称与头像通过
+  peer-RPC `user.getInfo` 广播给房间内客户端（与 Astral Game 客户端互通）
+- **网络设置**：可开关「禁用 P2P 打洞」（仅走中继转发）
+- **配色方案**：设置页内置昼间 5 种 + 夜间 5 种（共 10 种）配色，本地记忆
 - **服务器**：添加/编辑/删除中继服务器，一键测速查看延迟
 - **设置**：查看运行状态、编辑配置、管理进网凭据、查看实时日志

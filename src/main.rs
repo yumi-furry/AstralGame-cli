@@ -4,6 +4,7 @@ mod http;
 mod invite;
 mod models;
 mod node;
+mod peer_rpc;
 mod status;
 mod store;
 mod web;
@@ -100,7 +101,8 @@ async fn run_server(config_path: &PathBuf) -> anyhow::Result<()> {
         .try_init()
         .ok();
 
-    let node = node::NodeRuntime::new();
+    let server_config = Arc::new(std::sync::RwLock::new(loaded.server.clone()));
+    let node = node::NodeRuntime::new(server_config.clone());
 
     // 若配置里包含 EasyTier 实例节（至少 network_identity），启动时自动联网。
     if !loaded.instance_toml.trim().is_empty() && has_instance_config(&loaded.instance_toml) {
@@ -110,12 +112,12 @@ async fn run_server(config_path: &PathBuf) -> anyhow::Result<()> {
         }
     }
 
-    let app_state = Arc::new(http::AppState {
+    let app_state = http::AppState {
         node: node.clone(),
         config_path: config_path.clone(),
-        server_config: Arc::new(loaded.server.clone()),
+        server_config,
         current_room: Arc::new(std::sync::Mutex::new(None)),
-    });
+    };
     let router = http::build_router(app_state);
 
     let addr = format!("{}:{}", loaded.server.web_bind, loaded.server.web_port);

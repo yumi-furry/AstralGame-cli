@@ -19,6 +19,15 @@ pub struct ServerConfig {
     /// tracing 日志级别（trace/debug/info/warn/error）。
     #[serde(default = "default_log_level")]
     pub log_level: String,
+    /// 房间内展示的昵称（写入 EasyTier hostname，对端可见）。
+    #[serde(default = "default_nickname")]
+    pub nickname: String,
+    /// 房间内展示的本机图标（emoji，Web 端显示）。
+    #[serde(default = "default_icon")]
+    pub icon: String,
+    /// 是否禁用 P2P 打洞（仅走中继）。
+    #[serde(default)]
+    pub disable_p2p: bool,
 }
 
 impl Default for ServerConfig {
@@ -29,8 +38,19 @@ impl Default for ServerConfig {
             username: String::new(),
             password: String::new(),
             log_level: default_log_level(),
+            nickname: default_nickname(),
+            icon: default_icon(),
+            disable_p2p: false,
         }
     }
+}
+
+fn default_nickname() -> String {
+    "astral-server".into()
+}
+
+fn default_icon() -> String {
+    "🎮".into()
 }
 
 fn default_web_bind() -> String {
@@ -79,6 +99,25 @@ pub fn parse(raw: &str) -> Result<LoadedConfig> {
     })
 }
 
+/// 将 [ServerConfig] 写回 config.toml 的 `[astral_server]` 节，其余 EasyTier 内容原样保留。
+pub fn save(path: &Path, server: &ServerConfig) -> Result<()> {
+    let raw = fs::read_to_string(path).unwrap_or_default();
+    let mut value: toml::Value = if raw.trim().is_empty() {
+        toml::Value::Table(Default::default())
+    } else {
+        toml::from_str(&raw).context("配置文件不是合法 TOML")?
+    };
+    let table = value
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("配置根节点不是表"))?;
+    let server_value: toml::Value =
+        toml::Value::try_from(server).context("序列化 ServerConfig 失败")?;
+    table.insert("astral_server".to_string(), server_value);
+    let out = toml::to_string_pretty(&value).context("序列化配置失败")?;
+    fs::write(path, out).context("写入配置文件失败")?;
+    Ok(())
+}
+
 pub fn write_example_config(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -103,6 +142,12 @@ username = "admin"
 password = "change-me-please"
 # 日志级别：trace / debug / info / warn / error
 log_level = "info"
+# 房间内展示的昵称（写入 EasyTier hostname，对端客户端可见）
+nickname = "astral-server"
+# 房间内展示的本机图标（emoji，Web 端显示）
+icon = "🎮"
+# 是否禁用 P2P 打洞（仅走中继，谨慎开启）
+disable_p2p = false
 
 # -----------------------------------------------------------------------------
 # 以下是 EasyTier 节点配置
@@ -114,10 +159,10 @@ hostname = "astral-server"
 dhcp = true
 # ipv4 = "10.10.10.1"
 
-# 本机监听地址（0.0.0.0 对外开放；换成 127.0.0.1 仅本机）
+# 本机监听地址（0.0.0.0 对外开放；换成 127.0.0.1 仅本机；端口 0 表示随机）
 listeners = [
-    "tcp://0.0.0.0:11010",
-    "udp://0.0.0.0:11010",
+    "tcp://0.0.0.0:0",
+    "udp://0.0.0.0:0",
 ]
 
 # 组网身份：同网络的节点 network_name / network_secret 必须一致
@@ -129,9 +174,16 @@ network_secret = "please-change-this-secret"
 # [[peer]]
 # uri = "tcp://public.easytier.cn:11010"
 
-# EasyTier 内核开关
+# EasyTier 内核开关（与原版客户端对齐）
 [flags]
+data_compress_algo = 2
 default_protocol = "tcp"
 dev_name = "astral0"
+disable_kcp_input = true
+disable_relay_kcp = true
+enable_relay_foreign_network_kcp = false
+disable_quic_input = true
+disable_relay_quic = true
+enable_relay_foreign_network_quic = false
 # 若使用固定 IP 且关闭 DHCP，请把 dhcp 设为 false 并填写 ipv4
 "#;
