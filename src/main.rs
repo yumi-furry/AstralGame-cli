@@ -117,6 +117,7 @@ async fn run_server(config_path: &PathBuf) -> anyhow::Result<()> {
         config_path: config_path.clone(),
         server_config,
         current_room: Arc::new(std::sync::Mutex::new(None)),
+        sessions: Arc::new(std::sync::RwLock::new(std::collections::HashSet::new())),
     };
     let router = http::build_router(app_state);
 

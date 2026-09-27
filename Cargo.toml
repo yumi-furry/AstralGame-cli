@@ -21,7 +21,7 @@ toml = "0.8"
 anyhow = "1"
 base64 = "0.22"
 sha2 = "0.10"
-uuid = "1"
+uuid = { version = "1", features = ["v4"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -2,7 +2,7 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -16,6 +16,48 @@ use crate::store;
 
 fn err(status: StatusCode, msg: impl Into<String>) -> Response {
     (status, Json(json!({ "error": msg.into() }))).into_response()
+}
+
+// ---------- 登录 / 登出（Cookie 会话） ----------
+
+#[derive(Deserialize)]
+pub struct LoginRequest {
+    username: String,
+    password: String,
+}
+
+pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>) -> Response {
+    let ok = {
+        let cfg = state.server_config.read().unwrap();
+        !cfg.username.is_empty() && body.username == cfg.username && body.password == cfg.password
+    };
+    if !ok {
+        return err(StatusCode::UNAUTHORIZED, "用户名或密码错误");
+    }
+    let token = uuid::Uuid::new_v4().to_string();
+    state.sessions.write().unwrap().insert(token.clone());
+    (
+        [(
+            header::SET_COOKIE,
+            format!("astral_session={token}; Path=/; HttpOnly; SameSite=Lax"),
+        )],
+        Json(json!({ "ok": true })),
+    )
+        .into_response()
+}
+
+pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if let Some(token) = crate::http::session_token(&headers) {
+        state.sessions.write().unwrap().remove(&token);
+    }
+    (
+        [(
+            header::SET_COOKIE,
+            "astral_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0".to_string(),
+        )],
+        Json(json!({ "ok": true })),
+    )
+        .into_response()
 }
 
 // ---------- 节点状态 / 日志 ----------
