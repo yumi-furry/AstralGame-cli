@@ -148,6 +148,7 @@ dependencies = [
  "anyhow",
  "axum",
  "base64 0.22.1",
+ "cidr 0.2.3",
  "clap",
  "easytier",
  "rand 0.8.8",
@@ -608,6 +609,12 @@ dependencies = [
  "wasm-bindgen",
  "windows-link",
 ]
+
+[[package]]
+name = "cidr"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bdf600c45bd958cf2945c445264471cca8b6c8e67bc87b71affd6d7e5682621"
 
 [[package]]
 name = "cidr"
@@ -1260,7 +1267,7 @@ dependencies = [
  "bytes",
  "cfg_aliases",
  "chrono",
- "cidr",
+ "cidr 0.3.2",
  "clap",
  "clap_complete",
  "clap_complete_nushell",
@@ -3474,7 +3481,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85cf4c7c25f1dd66c76b451e9041a8cfce26e4ca754934fa7aed8d5a59a01d20"
 dependencies = [
- "cidr",
+ "cidr 0.3.2",
  "ipnet",
  "num-traits",
 ]

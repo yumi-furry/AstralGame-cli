@@ -28,6 +28,12 @@ pub struct ServerConfig {
     /// 是否禁用 P2P 打洞（仅走中继）。
     #[serde(default)]
     pub disable_p2p: bool,
+    /// 是否创建 TUN 虚拟网卡（参与 MC 局域网发现等需要虚拟 IP 的场景）。
+    #[serde(default = "default_enable_tun")]
+    pub enable_tun: bool,
+    /// 启用 TUN 时可选的静态虚拟 IP（CIDR，如 "10.126.0.1/24"）；为空则走 DHCP。
+    #[serde(default)]
+    pub static_ipv4: String,
 }
 
 impl Default for ServerConfig {
@@ -41,8 +47,14 @@ impl Default for ServerConfig {
             nickname: default_nickname(),
             icon: default_icon(),
             disable_p2p: false,
+            enable_tun: default_enable_tun(),
+            static_ipv4: String::new(),
         }
     }
+}
+
+fn default_enable_tun() -> bool {
+    true
 }
 
 fn default_nickname() -> String {
@@ -148,6 +160,10 @@ nickname = "astral-server"
 icon = "🎮"
 # 是否禁用 P2P 打洞（仅走中继，谨慎开启）
 disable_p2p = false
+# 是否创建 TUN 虚拟网卡（参与 MC 局域网发现等需要虚拟 IP 的场景）
+enable_tun = true
+# 启用 TUN 时的静态虚拟 IP（CIDR 格式，如 "10.126.0.1/24"）；留空则走 DHCP
+static_ipv4 = ""
 
 # -----------------------------------------------------------------------------
 # 以下是 EasyTier 节点配置

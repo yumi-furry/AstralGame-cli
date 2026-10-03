@@ -108,10 +108,17 @@ impl NodeRuntime {
             }
         }
 
+        let dev_name = cfg.get_flags().dev_name.clone();
         let id = self
             .manager
             .run_network_instance(cfg, true, ConfigFileControl::STATIC_CONFIG)
             .map_err(|e| format!("启动实例失败: {e}"))?;
+
+        // 对齐上游 v1.4.2 的网卡跃点修复（Linux 等价：组播/广播路由指向 TUN 并压低 metric）。
+        #[cfg(target_os = "linux")]
+        self.spawn_nic_route_fix_task(dev_name);
+        #[cfg(not(target_os = "linux"))]
+        let _ = dev_name;
 
         *self.current_id.lock().unwrap() = Some(id);
         *self.toml.lock().unwrap() = Some(config_toml);
@@ -132,6 +139,57 @@ impl NodeRuntime {
         self.spawn_app_rpc(id).await;
         self.spawn_poll(id).await;
         Ok(id.to_string())
+    }
+
+    /// 上游 v1.4.2 修复了 Windows wintun 跃点偏高导致 MC 局域网发现失败的问题。
+    /// Linux 上等价问题：组播（MC 发现用 224.0.2.60）与受限广播默认走默认路由接口，
+    /// 不会进入 TUN 虚拟网卡，房间内其他成员收不到。
+    /// 这里等虚拟网卡出现后，把组播/广播路由指向它并压 metric=1（合法最小值）。
+    /// 网卡由 EasyTier 异步创建，run_network_instance 返回时可能尚未出现，需轮询等待；
+    /// 设置失败只记日志，不影响启动流程。
+    #[cfg(target_os = "linux")]
+    fn spawn_nic_route_fix_task(&self, dev_name: String) {
+        if dev_name.is_empty() {
+            return;
+        }
+        let logs = self.logs.clone();
+        tokio::spawn(async move {
+            let max_attempts = 30u32;
+            for attempt in 1..=max_attempts {
+                let dev = dev_name.clone();
+                let exists = tokio::task::spawn_blocking(move || nic_exists(&dev))
+                    .await
+                    .unwrap_or(false);
+                if exists {
+                    let dev = dev_name.clone();
+                    let ok = tokio::task::spawn_blocking(move || apply_mcast_routes(&dev))
+                        .await
+                        .unwrap_or(false);
+                    if ok {
+                        push_log_into(
+                            &logs,
+                            "info",
+                            format!("nic {dev_name}: 组播/广播路由已指向虚拟网卡 (metric 1)"),
+                        );
+                    } else {
+                        push_log_into(
+                            &logs,
+                            "warn",
+                            format!("nic {dev_name}: 组播路由设置失败，MC 局域网发现可能不可用"),
+                        );
+                    }
+                    return;
+                }
+                if attempt < max_attempts {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+            }
+            push_log_into(
+                &logs,
+                "warn",
+                format!("nic {dev_name}: 等待网卡出现超时，跳过组播路由设置"),
+            );
+        });
     }
 
     async fn spawn_poll(&self, id: Uuid) {
@@ -330,6 +388,30 @@ impl NodeRuntime {
             })
             .collect())
     }
+}
+
+#[cfg(target_os = "linux")]
+fn nic_exists(dev: &str) -> bool {
+    std::process::Command::new("ip")
+        .args(["link", "show", "dev", dev])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// 组播是关键路径（MC 局域网发现走 224.0.2.60）；受限广播尽力而为，失败不影响结果判定。
+#[cfg(target_os = "linux")]
+fn apply_mcast_routes(dev: &str) -> bool {
+    let replace = |dst: &str| -> bool {
+        std::process::Command::new("ip")
+            .args(["route", "replace", dst, "dev", dev, "metric", "1"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    let mcast = replace("224.0.0.0/4");
+    let _bcast = replace("255.255.255.255/32");
+    mcast
 }
 
 fn node_ipv4(st: &NetworkStatus) -> Option<String> {

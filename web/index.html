@@ -336,6 +336,17 @@ textarea { font-family:"Cascadia Code",Consolas,monospace; font-size:12px; }
           <div><div class="settings-label">禁用 P2P 打洞</div><div class="settings-desc">开启后节点间优先走中继转发，不尝试 P2P 直连（下次建房/加入时生效）</div></div>
           <label class="switch"><input type="checkbox" id="disable-p2p" onchange="toggleP2p(this.checked)"><span class="slider"></span></label>
         </div>
+        <div class="settings-row">
+          <div><div class="settings-label">启用 TUN 虚拟网卡</div><div class="settings-desc">创建虚拟网卡参与房间通信（MC 局域网发现等游戏需要，下次建房/加入时生效）</div></div>
+          <label class="switch"><input type="checkbox" id="enable-tun" onchange="toggleTun(this.checked)"><span class="slider"></span></label>
+        </div>
+        <div class="settings-row" id="static-ip-row">
+          <div><div class="settings-label">静态虚拟 IP</div><div class="settings-desc">CIDR 格式（如 10.126.0.1/24），留空则自动分配；启用 TUN 时建议填写以避免 DHCP 超时</div></div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="text" id="static-ipv4" placeholder="10.126.0.1/24" style="width:160px;padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;">
+            <button class="btn btn-primary btn-sm" onclick="saveStaticIp()">保存</button>
+          </div>
+        </div>
       </div>
 
       <div class="card">
@@ -516,7 +527,7 @@ function themeOptHtml(t, cur) {
 
 /* ================= 图标选择 ================= */
 const ICONS = ['🎮','👾','🕹️','⛏️','🚗','🏭','🛶','⚔️','🐱','🐶','🐰','🦊','🐼','🐸','🦁','🐙','🧙','🎯','🎲','🧩','🌐','💻','🖥️','📡','⚙️','🚀'];
-let profile = { nickname:'服务器', icon:'🎮', disable_p2p:false, avatar:null };
+let profile = { nickname:'服务器', icon:'🎮', disable_p2p:false, enable_tun:true, static_ipv4:'', avatar:null };
 let pendingAvatar = null;
 let avatarDirty = false;
 
@@ -595,7 +606,7 @@ function renderAvatar(el, base64, emoji) {
 async function loadProfile() {
   try {
     const d = await api('/profile');
-    profile = { nickname:d.nickname||'服务器', icon:d.icon||'🎮', disable_p2p:!!d.disable_p2p, avatar:d.avatar||null };
+    profile = { nickname:d.nickname||'服务器', icon:d.icon||'🎮', disable_p2p:!!d.disable_p2p, enable_tun:d.enable_tun!==false, static_ipv4:d.static_ipv4||'', avatar:d.avatar||null };
     applyProfileUI();
   } catch(e) {}
 }
@@ -609,6 +620,8 @@ function applyProfileUI() {
   renderAvatar(document.getElementById('settings-avatar'), profile.avatar, profile.icon);
   document.getElementById('settings-nickname').textContent = name;
   document.getElementById('disable-p2p').checked = profile.disable_p2p;
+  document.getElementById('enable-tun').checked = profile.enable_tun;
+  document.getElementById('static-ipv4').value = profile.static_ipv4;
 }
 function openEditProfile() {
   pendingAvatar = profile.avatar;
@@ -663,6 +676,24 @@ async function toggleP2p(checked) {
     profile.disable_p2p = d.disable_p2p;
     toast(checked ? '已启用仅中继（禁用 P2P）' : '已恢复 P2P 打洞');
   } catch(e){ document.getElementById('disable-p2p').checked = !checked; toast(e.message,'error'); }
+}
+async function toggleTun(checked) {
+  try {
+    const d = await api('/profile',{method:'PUT',body:JSON.stringify({enable_tun:checked})});
+    profile.enable_tun = d.enable_tun;
+    toast(checked ? '已启用 TUN 虚拟网卡（下次建房生效）' : '已禁用 TUN 虚拟网卡（下次建房生效）');
+  } catch(e){ document.getElementById('enable-tun').checked = !checked; toast(e.message,'error'); }
+}
+async function saveStaticIp() {
+  const ip = document.getElementById('static-ipv4').value.trim();
+  if (ip && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/.test(ip)) {
+    return toast('请输入 CIDR 格式（如 10.126.0.1/24）','error');
+  }
+  try {
+    const d = await api('/profile',{method:'PUT',body:JSON.stringify({static_ipv4:ip})});
+    profile.static_ipv4 = d.static_ipv4;
+    toast(ip ? '静态 IP 已保存（下次建房生效）' : '已恢复自动分配（下次建房生效）');
+  } catch(e){ toast(e.message,'error'); }
 }
 
 /* ================= 联机 ================= */

@@ -92,6 +92,10 @@ pub struct PutProfileRequest {
     nickname: Option<String>,
     icon: Option<String>,
     disable_p2p: Option<bool>,
+    /// 是否创建 TUN 虚拟网卡
+    enable_tun: Option<bool>,
+    /// 静态虚拟 IP（CIDR；空串=DHCP）
+    static_ipv4: Option<String>,
     /// 头像图片 base64（None=不改；空串=清除；否则更新为图片）
     avatar: Option<String>,
 }
@@ -106,6 +110,8 @@ pub async fn get_profile(State(state): State<AppState>) -> impl IntoResponse {
         "nickname": cfg.nickname,
         "icon": cfg.icon,
         "disable_p2p": cfg.disable_p2p,
+        "enable_tun": cfg.enable_tun,
+        "static_ipv4": cfg.static_ipv4,
         "avatar": avatar,
     }))
 }
@@ -131,6 +137,16 @@ pub async fn put_profile(
         }
         if let Some(d) = req.disable_p2p {
             cfg.disable_p2p = d;
+        }
+        if let Some(t) = req.enable_tun {
+            cfg.enable_tun = t;
+        }
+        if let Some(ip) = req.static_ipv4 {
+            let ip = ip.trim().to_string();
+            if !ip.is_empty() && ip.parse::<cidr::Ipv4Inet>().is_err() {
+                return err(StatusCode::BAD_REQUEST, "静态 IP 必须是合法 CIDR（如 10.126.0.1/24）");
+            }
+            cfg.static_ipv4 = ip;
         }
     }
 
@@ -164,6 +180,8 @@ pub async fn put_profile(
         "nickname": cfg.nickname,
         "icon": cfg.icon,
         "disable_p2p": cfg.disable_p2p,
+        "enable_tun": cfg.enable_tun,
+        "static_ipv4": cfg.static_ipv4,
     }))
     .into_response()
 }
@@ -338,8 +356,8 @@ pub async fn create_room(
         peers: payload.peers.clone(),
     };
 
-    let (hostname, disable_p2p) = room_template_params(&state);
-    let toml = build_room_toml(&room, &hostname, disable_p2p);
+    let (hostname, disable_p2p, enable_tun, static_ipv4) = room_template_params(&state);
+    let toml = build_room_toml(&room, &hostname, disable_p2p, enable_tun, &static_ipv4);
     match state.node.start(toml).await {
         Ok(id) => {
             *state.current_room.lock().unwrap() = Some(room.clone());
@@ -388,8 +406,8 @@ pub async fn join_room(
         peers: payload.peers.clone(),
     };
 
-    let (hostname, disable_p2p) = room_template_params(&state);
-    let toml = build_room_toml(&room, &hostname, disable_p2p);
+    let (hostname, disable_p2p, enable_tun, static_ipv4) = room_template_params(&state);
+    let toml = build_room_toml(&room, &hostname, disable_p2p, enable_tun, &static_ipv4);
     match state.node.start(toml).await {
         Ok(id) => {
             *state.current_room.lock().unwrap() = Some(room.clone());
@@ -425,11 +443,33 @@ pub async fn current_room(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-fn build_room_toml(room: &crate::models::ActiveRoom, hostname: &str, disable_p2p: bool) -> String {
+fn build_room_toml(
+    room: &crate::models::ActiveRoom,
+    hostname: &str,
+    disable_p2p: bool,
+    enable_tun: bool,
+    static_ipv4: &str,
+) -> String {
     let mut s = String::new();
     s.push_str("instance_name = \"astral-server\"\n");
     s.push_str(&format!("hostname = \"{}\"\n", tml_escape(hostname)));
-    s.push_str("dhcp = true\n");
+
+    // TUN 开关：关闭时不创建虚拟网卡（服务器仅作为网络协调节点）。
+    if !enable_tun {
+        s.push_str("no_tun = true\n");
+        s.push_str("dhcp = false\n");
+    } else {
+        // 静态 IP 模式：写入顶层 ipv4 键并关闭 DHCP。
+        // 与上游 v1.4.2 客户端修复对齐：必须写顶层，不能写 [flags] 里。
+        let static_ip = static_ipv4.trim();
+        if !static_ip.is_empty() {
+            s.push_str(&format!("ipv4 = \"{}\"\n", tml_escape(static_ip)));
+            s.push_str("dhcp = false\n");
+        } else {
+            s.push_str("dhcp = true\n");
+        }
+    }
+
     s.push_str("listeners = [\n");
     s.push_str("    \"tcp://0.0.0.0:0\",\n");
     s.push_str("    \"udp://0.0.0.0:0\",\n");
@@ -461,10 +501,15 @@ fn tml_escape(s: &str) -> String {
     s.replace('\\', r"\\").replace('"', r#"\""#)
 }
 
-/// 读取当前昵称（hostname）与是否禁用 P2P，用于构建房间 TOML。
-fn room_template_params(state: &AppState) -> (String, bool) {
+/// 读取构建房间 TOML 所需的服务端配置。
+fn room_template_params(state: &AppState) -> (String, bool, bool, String) {
     let cfg = state.server_config.read().unwrap();
-    (cfg.nickname.clone(), cfg.disable_p2p)
+    (
+        cfg.nickname.clone(),
+        cfg.disable_p2p,
+        cfg.enable_tun,
+        cfg.static_ipv4.clone(),
+    )
 }
 
 async fn try_create_short_code(payload: &RoomInvitePayload) -> anyhow::Result<String> {
