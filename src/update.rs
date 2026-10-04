@@ -14,12 +14,14 @@ pub fn current_version() -> String {
 }
 
 /// 解析版本号为 (major, minor, patch, build)，build 默认为 0。
-/// 支持 "1.4.2"、"1.4.2_1"、"1.4.2-1" 三种格式。
+/// 支持 "1.4.2"、"1.4.2_1"、"1.4.2-1"、"v1.4.2"、"V1.4.2_1" 等格式。
 fn parse_version(v: &str) -> (u64, u64, u64, u64) {
     let s = v.replace('_', "-");
+    // 去掉可选的 v/V 前缀
+    let s = s.strip_prefix(['v', 'V']).unwrap_or(&s);
     let (main, build) = match s.split_once('-') {
         Some((m, b)) => (m, b.parse::<u64>().unwrap_or(0)),
-        None => (s.as_str(), 0),
+        None => (s, 0),
     };
     let parts: Vec<u64> = main
         .split('.')
