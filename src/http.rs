@@ -53,7 +53,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/servers/ping", get(crate::api::ping_servers))
         .route("/servers/:id", put(crate::api::update_server).delete(crate::api::delete_server))
         // 游戏列表
-        .route("/games", get(crate::api::list_games));
+        .route("/games", get(crate::api::list_games))
+        .route("/update/check", get(crate::api::check_update))
+        .route("/update/apply", post(crate::api::apply_update));
 
     // 登录/登出接口不鉴权（route_layer 只作用于已注册路由，merge 进来的不受影响）
     let auth_routes = Router::new()

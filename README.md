@@ -9,7 +9,6 @@
 ```
 /opt/astral-server/       # 部署后统一目录
 ├── astral-server         # 可执行文件
-├──astral-server.service  # 服务配置文件
 ├── config.toml           # 配置文件（Web 端口、账号密码等）
 └── servers.json          # 服务器列表数据（自动生成）
 ```

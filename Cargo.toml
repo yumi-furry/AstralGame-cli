@@ -1,6 +1,6 @@
 [package]
 name = "astral-server"
-version = "2.0.0"
+version = "1.4.2-1"
 edition = "2021"
 description = "Astral Game P2P server (headless) with embedded web management"
 license = "MIT"

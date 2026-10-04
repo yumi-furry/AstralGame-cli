@@ -792,3 +792,52 @@ pub async fn list_games() -> impl IntoResponse {
         ]
     }))
 }
+
+// ---------- 在线更新 ----------
+
+#[derive(Deserialize)]
+pub struct ApplyUpdateRequest {
+    download_url: String,
+}
+
+/// 检查 GitHub 最新发行版与当前版本是否一致。
+pub async fn check_update() -> Response {
+    let current = crate::update::current_version();
+    match crate::update::fetch_latest_release().await {
+        Ok(info) => {
+            let update_available = crate::update::is_newer(&info.tag_name, &current);
+            Json(json!({
+                "current_version": current,
+                "latest_version": info.tag_name,
+                "latest_name": info.name,
+                "update_available": update_available,
+                "release_notes": info.body,
+                "release_url": info.html_url,
+                "download_url": info.download_url,
+            }))
+            .into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "current_version": current, "error": e })),
+        )
+            .into_response(),
+    }
+}
+
+/// 下载指定版本并替换自身二进制，然后重启服务。
+pub async fn apply_update(Json(body): Json<ApplyUpdateRequest>) -> Response {
+    if body.download_url.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "download_url 不能为空");
+    }
+    if !body.download_url.starts_with("https://github.com/")
+        && !body.download_url.starts_with("https://objects.githubusercontent.com/")
+        && !body.download_url.starts_with("https://release-assets.githubusercontent.com/")
+    {
+        return err(StatusCode::BAD_REQUEST, "下载地址必须来自 GitHub");
+    }
+    match crate::update::apply_update(&body.download_url).await {
+        Ok(()) => Json(json!({ "ok": true, "message": "更新已应用，服务即将重启" })).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("更新失败: {e}")),
+    }
+}

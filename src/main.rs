@@ -7,6 +7,7 @@ mod node;
 mod peer_rpc;
 mod status;
 mod store;
+mod update;
 mod web;
 
 use std::path::PathBuf;
@@ -18,7 +19,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(
     name = "astral-server",
-    version,
+    version = "1.4.2_1",
     about = "Astral Game P2P server (headless) with embedded web management"
 )]
 struct Cli {

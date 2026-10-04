@@ -47,7 +47,7 @@ impl Snapshot {
             running: false,
             instance_id: None,
             easytier_version: easytier_version(),
-            server_version: env!("CARGO_PKG_VERSION").to_string(),
+            server_version: crate::update::current_version(),
             my_ipv4: None,
             total_nodes: 0,
             nodes: Vec::new(),
