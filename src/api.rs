@@ -98,6 +98,16 @@ pub struct PutProfileRequest {
     static_ipv4: Option<String>,
     /// 头像图片 base64（None=不改；空串=清除；否则更新为图片）
     avatar: Option<String>,
+    /// 守护进程：开机自动加入
+    auto_join_enabled: Option<bool>,
+    /// 自动加入邀请（短码/链接/AG1.离线串）
+    auto_join_code: Option<String>,
+    /// 守护进程：开机自动创建预设房间（与自动加入二选一）
+    auto_create_enabled: Option<bool>,
+    /// 自动创建预设游戏 ID
+    auto_create_game_id: Option<String>,
+    /// 自动创建预设游戏名称
+    auto_create_game_name: Option<String>,
 }
 
 pub async fn get_profile(State(state): State<AppState>) -> impl IntoResponse {
@@ -113,6 +123,11 @@ pub async fn get_profile(State(state): State<AppState>) -> impl IntoResponse {
         "enable_tun": cfg.enable_tun,
         "static_ipv4": cfg.static_ipv4,
         "avatar": avatar,
+        "auto_join_enabled": cfg.auto_join_enabled,
+        "auto_join_code": cfg.auto_join_code,
+        "auto_create_enabled": cfg.auto_create_enabled,
+        "auto_create_game_id": cfg.auto_create_game_id,
+        "auto_create_game_name": cfg.auto_create_game_name,
     }))
 }
 
@@ -148,6 +163,36 @@ pub async fn put_profile(
             }
             cfg.static_ipv4 = ip;
         }
+        if let Some(aj) = req.auto_join_enabled {
+            cfg.auto_join_enabled = aj;
+        }
+        if let Some(code) = req.auto_join_code {
+            cfg.auto_join_code = code.trim().to_string();
+        }
+        if let Some(ac) = req.auto_create_enabled {
+            cfg.auto_create_enabled = ac;
+        }
+        if let Some(gid) = req.auto_create_game_id {
+            cfg.auto_create_game_id = gid.trim().to_string();
+        }
+        if let Some(gname) = req.auto_create_game_name {
+            cfg.auto_create_game_name = gname.trim().to_string();
+        }
+        // 二选一：启用自动加入则关闭自动创建，反之亦然
+        if cfg.auto_join_enabled {
+            cfg.auto_create_enabled = false;
+        }
+        if cfg.auto_create_enabled {
+            cfg.auto_join_enabled = false;
+        }
+        // 启用自动加入但邀请为空 → 校验失败
+        if cfg.auto_join_enabled && cfg.auto_join_code.is_empty() {
+            return err(StatusCode::BAD_REQUEST, "启用自动加入时，房间邀请不能为空");
+        }
+        // 启用自动创建但未选游戏 → 校验失败
+        if cfg.auto_create_enabled && cfg.auto_create_game_id.is_empty() {
+            return err(StatusCode::BAD_REQUEST, "启用自动创建时，请先选择预设游戏");
+        }
     }
 
     if let Some(avatar_b64) = req.avatar {
@@ -182,6 +227,11 @@ pub async fn put_profile(
         "disable_p2p": cfg.disable_p2p,
         "enable_tun": cfg.enable_tun,
         "static_ipv4": cfg.static_ipv4,
+        "auto_join_enabled": cfg.auto_join_enabled,
+        "auto_join_code": cfg.auto_join_code,
+        "auto_create_enabled": cfg.auto_create_enabled,
+        "auto_create_game_id": cfg.auto_create_game_id,
+        "auto_create_game_name": cfg.auto_create_game_name,
     }))
     .into_response()
 }
@@ -314,6 +364,32 @@ pub async fn create_room(
     State(state): State<AppState>,
     Json(req): Json<CreateRoomRequest>,
 ) -> Response {
+    match create_room_impl(&state, req.game_id, req.game_name, req.display_name).await {
+        Ok((room, share_url, instance_id)) => {
+            // 广播房间变动（WebSocket + 邮件）
+            let st = state.clone();
+            tokio::spawn(async move {
+                crate::notify::EventHub::publish(&st, "room.created").await;
+            });
+            Json(json!({
+                "ok": true,
+                "instance_id": instance_id,
+                "room": room,
+                "share_url": share_url,
+            }))
+            .into_response()
+        }
+        Err((status, reason)) => err(status, reason),
+    }
+}
+
+/// 创建房间核心实现：供 REST 处理器与守护进程自动创建复用。
+pub async fn create_room_impl(
+    state: &AppState,
+    game_id: String,
+    game_name: String,
+    display_name: Option<String>,
+) -> Result<(crate::models::ActiveRoom, String, String), (StatusCode, String)> {
     let servers = store::load_servers();
     let enabled: Vec<PeerEndpoint> = servers
         .iter()
@@ -321,22 +397,27 @@ pub async fn create_room(
         .map(|s| PeerEndpoint { uri: s.uri.clone() })
         .collect();
     if enabled.is_empty() {
-        return err(StatusCode::BAD_REQUEST, "请先在「服务器」页启用至少一个服务器");
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "请先在「服务器」页启用至少一个服务器".to_string(),
+        ));
     }
 
     let payload = RoomInvitePayload {
         v: 1,
-        game_id: req.game_id,
-        game_name: req.game_name,
+        game_id: game_id.clone(),
+        game_name: game_name.clone(),
         network_name: invite::generate_network_name(),
         network_secret: invite::generate_network_secret(),
         peers: enabled,
-        display_name: req.display_name,
+        display_name: display_name.clone(),
     };
 
     let offline_invite = match invite::encode_offline_invite(&payload) {
         Ok(s) => s,
-        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, format!("生成邀请串失败: {e}")),
+        Err(e) => {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, format!("生成邀请串失败: {e}")));
+        }
     };
 
     let short_code = try_create_short_code(&payload).await.ok();
@@ -356,21 +437,17 @@ pub async fn create_room(
         peers: payload.peers.clone(),
     };
 
-    let (hostname, disable_p2p, enable_tun, static_ipv4) = room_template_params(&state);
+    let (hostname, disable_p2p, enable_tun, static_ipv4) = room_template_params(state);
     let toml = build_room_toml(&room, &hostname, disable_p2p, enable_tun, &static_ipv4);
-    match state.node.start(toml).await {
-        Ok(id) => {
-            *state.current_room.lock().unwrap() = Some(room.clone());
-            Json(json!({
-                "ok": true,
-                "instance_id": id,
-                "room": room,
-                "share_url": invite::build_join_url(short_code.as_deref(), Some(&offline_invite)),
-            }))
-            .into_response()
-        }
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("启动实例失败: {e}")),
-    }
+    let instance_id = state.node.start(toml).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("启动实例失败: {e}"),
+        )
+    })?;
+    *state.current_room.lock().unwrap() = Some(room.clone());
+    let share_url = invite::build_join_url(short_code.as_deref(), Some(&offline_invite));
+    Ok((room, share_url, instance_id))
 }
 
 #[derive(Deserialize)]
@@ -382,11 +459,39 @@ pub async fn join_room(
     State(state): State<AppState>,
     Json(req): Json<JoinRoomRequest>,
 ) -> Response {
-    let input = req.input.trim();
-    let payload = match resolve_invite(input).await {
-        Ok(p) => p,
-        Err(e) => return err(StatusCode::BAD_REQUEST, format!("解析邀请失败: {e}")),
-    };
+    match join_from_input(&state, req.input).await {
+        Ok((room, share_url, instance_id)) => {
+            // 广播房间变动（WebSocket + 邮件）
+            let st = state.clone();
+            tokio::spawn(async move {
+                crate::notify::EventHub::publish(&st, "room.joined").await;
+            });
+            Json(json!({
+                "ok": true,
+                "instance_id": instance_id,
+                "room": room,
+                "share_url": share_url,
+            }))
+            .into_response()
+        }
+        Err((status, msg)) => err(status, msg),
+    }
+}
+
+/// 可复用的「加入房间」核心逻辑：解析邀请 → 构建房间 → 启动节点 → 写入当前房间。
+/// 同时供 HTTP 处理器与启动时守护进程自动加入调用。
+pub async fn join_from_input(
+    state: &AppState,
+    input: String,
+) -> Result<(crate::models::ActiveRoom, String, String), (StatusCode, String)> {
+    let input = input.trim();
+    if input.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "房间邀请不能为空".into()));
+    }
+
+    let payload = resolve_invite(input)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("解析邀请失败: {e}")))?;
 
     // 判断输入是否为短码，若是则保存以便前端显示
     let short_code = extract_short_code(input);
@@ -406,29 +511,30 @@ pub async fn join_room(
         peers: payload.peers.clone(),
     };
 
-    let (hostname, disable_p2p, enable_tun, static_ipv4) = room_template_params(&state);
+    let (hostname, disable_p2p, enable_tun, static_ipv4) = room_template_params(state);
     let toml = build_room_toml(&room, &hostname, disable_p2p, enable_tun, &static_ipv4);
-    match state.node.start(toml).await {
-        Ok(id) => {
-            *state.current_room.lock().unwrap() = Some(room.clone());
-            Json(json!({
-                "ok": true,
-                "instance_id": id,
-                "room": room,
-                "share_url": invite::build_join_url(
-                    room.short_code.as_deref(),
-                    room.offline_invite.as_deref(),
-                ),
-            }))
-            .into_response()
-        }
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("启动实例失败: {e}")),
-    }
+    let id = state
+        .node
+        .start(toml)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("启动实例失败: {e}")))?;
+
+    let share_url = invite::build_join_url(
+        room.short_code.as_deref(),
+        room.offline_invite.as_deref(),
+    );
+    *state.current_room.lock().unwrap() = Some(room.clone());
+    Ok((room, share_url, id))
 }
 
 pub async fn leave_room(State(state): State<AppState>) -> impl IntoResponse {
     state.node.stop().await;
     *state.current_room.lock().unwrap() = None;
+    // 广播房间已离开（room=null，不发邮件）
+    let st = state.clone();
+    tokio::spawn(async move {
+        crate::notify::EventHub::publish(&st, "room.left").await;
+    });
     Json(json!({ "ok": true }))
 }
 
@@ -791,6 +897,155 @@ pub async fn list_games() -> impl IntoResponse {
             { "id": "custom", "name": "自定义", "description": "手动填写网络名与密钥", "icon": "" },
         ]
     }))
+}
+
+// ---------- SMTP / 邮件通知 ----------
+
+/// 获取 SMTP 配置（密码不回传，仅返回是否已设置）。
+pub async fn get_smtp(State(state): State<AppState>) -> impl IntoResponse {
+    let cfg = state.server_config.read().unwrap();
+    let s = &cfg.smtp;
+    Json(json!({
+        "enabled": s.enabled,
+        "host": s.host,
+        "port": s.port,
+        "username": s.username,
+        "password_set": !s.password.is_empty(),
+        "from_name": s.from_name,
+        "from_email": s.from_email,
+        "encryption": s.encryption,
+        "recipients": s.recipients,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct RecipientsRequest {
+    recipients: Vec<String>,
+}
+
+/// 更新收件人邮箱列表（面板维护，写回 config.toml）。
+pub async fn put_recipients(
+    State(state): State<AppState>,
+    Json(req): Json<RecipientsRequest>,
+) -> Response {
+    // trim → 去重 → 基本格式校验，保持顺序
+    let mut recipients: Vec<String> = Vec::new();
+    for addr in req.recipients {
+        let addr = addr.trim().to_string();
+        if addr.is_empty() || recipients.contains(&addr) {
+            continue;
+        }
+        if !is_valid_email(&addr) {
+            return err(StatusCode::BAD_REQUEST, format!("邮箱地址格式不正确：{addr}"));
+        }
+        recipients.push(addr);
+    }
+
+    {
+        let mut cfg = state.server_config.write().unwrap();
+        cfg.smtp.recipients = recipients.clone();
+        if let Err(e) = crate::config::save(&state.config_path, &cfg) {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, format!("保存配置失败: {e}"));
+        }
+    }
+    Json(json!({ "ok": true, "recipients": recipients })).into_response()
+}
+
+/// 发送测试邮件验证 SMTP 配置。
+pub async fn test_smtp(State(state): State<AppState>) -> Response {
+    let smtp = { state.server_config.read().unwrap().smtp.clone() };
+    if !smtp.enabled {
+        return err(StatusCode::BAD_REQUEST, "SMTP 未启用（请在 config.toml 中开启并填写服务器参数）");
+    }
+    if smtp.host.is_empty() || smtp.from_email.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "SMTP 主机或发件邮箱未配置");
+    }
+    if !is_valid_email(&smtp.from_email) {
+        return err(StatusCode::BAD_REQUEST, "发件邮箱格式不正确");
+    }
+    if smtp.recipients.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "收件人列表为空，请先添加收件邮箱");
+    }
+    // 发信耗时可能较长，最多等 30 秒
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        crate::mailer::send_test(&smtp),
+    )
+    .await
+    {
+        Ok(Ok(())) => Json(json!({ "ok": true, "message": "测试邮件已发送" })).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_GATEWAY, e),
+        Err(_) => err(StatusCode::GATEWAY_TIMEOUT, "SMTP 连接超时，请检查主机/端口/加密方式"),
+    }
+}
+
+/// 一键发送当前房间详情邮件给所有收件人。
+pub async fn send_now_smtp(State(state): State<AppState>) -> Response {
+    let smtp = { state.server_config.read().unwrap().smtp.clone() };
+    if !smtp.enabled {
+        return err(StatusCode::BAD_REQUEST, "SMTP 未启用（请在 config.toml 中开启并填写服务器参数）");
+    }
+    if smtp.recipients.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "收件人列表为空，请先添加收件邮箱");
+    }
+    let room = { state.current_room.lock().unwrap().clone() };
+    let Some(room) = room else {
+        return err(StatusCode::BAD_REQUEST, "当前无房间，请先创建或加入房间");
+    };
+    let share_url = crate::invite::build_join_url(
+        room.short_code.as_deref(),
+        room.offline_invite.as_deref(),
+    );
+    let snap = state.node.snapshot();
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        crate::mailer::send_room_notification(
+            &smtp, "房间详情速递", "您请求的当前房间详情如下", Some(&room), &share_url, &snap,
+        ),
+    ).await {
+        Ok(Ok(())) => Json(json!({ "ok": true, "message": format!("房间详情邮件已发送给 {} 位收件人", smtp.recipients.len()) })).into_response(),
+        Ok(Err(e)) => err(StatusCode::BAD_GATEWAY, e),
+        Err(_) => err(StatusCode::GATEWAY_TIMEOUT, "SMTP 连接超时，请检查主机/端口/加密方式"),
+    }
+}
+
+// ---------- WebSocket 第三方服务 ----------
+
+/// 获取当前第三方服务连接密钥。
+pub async fn get_ws_key(State(state): State<AppState>) -> impl IntoResponse {
+    let key = state.server_config.read().unwrap().ws_key.clone();
+    Json(json!({ "key": key }))
+}
+
+/// 刷新第三方服务连接密钥：生成新密钥并写回配置，旧密钥立即失效（所有已连接服务被踢下线）。
+pub async fn rotate_ws_key(State(state): State<AppState>) -> Response {
+    let new_key = crate::config::generate_ws_key();
+    {
+        let mut cfg = state.server_config.write().unwrap();
+        cfg.ws_key = new_key.clone();
+        if let Err(e) = crate::config::save(&state.config_path, &cfg) {
+            return err(StatusCode::INTERNAL_SERVER_ERROR, format!("保存配置失败: {e}"));
+        }
+    }
+    let kicked = state.ws_registry.kick_all();
+    Json(json!({ "ok": true, "key": new_key, "disconnected": kicked })).into_response()
+}
+
+/// 当前在线第三方服务列表。
+pub async fn list_ws_services(State(state): State<AppState>) -> impl IntoResponse {
+    Json(json!({ "services": state.ws_registry.list() }))
+}
+
+/// 简单的邮箱格式校验：含 @，@ 前后有内容，域名含点。
+fn is_valid_email(addr: &str) -> bool {
+    let Some((user, domain)) = addr.split_once('@') else {
+        return false;
+    };
+    !user.is_empty()
+        && !domain.is_empty()
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
 }
 
 // ---------- 在线更新 ----------

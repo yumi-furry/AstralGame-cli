@@ -25,6 +25,10 @@ pub struct AppState {
     pub current_room: Arc<std::sync::Mutex<Option<ActiveRoom>>>,
     /// 已登录会话 token 集合（Cookie 值），重启后失效
     pub sessions: Arc<std::sync::RwLock<HashSet<String>>>,
+    /// 房间变动事件中心（WebSocket 广播 + 邮件触发）
+    pub hub: Arc<crate::notify::EventHub>,
+    /// 在线第三方服务注册表（WebSocket 密钥认证连接）
+    pub ws_registry: Arc<crate::ws::WsRegistry>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -54,13 +58,26 @@ pub fn build_router(state: AppState) -> Router {
         .route("/servers/:id", put(crate::api::update_server).delete(crate::api::delete_server))
         // 游戏列表
         .route("/games", get(crate::api::list_games))
+        // WebSocket 事件推送（房间内容/房间码/房间状态）
+        .route("/ws", get(crate::ws::ws_upgrade))
+        // 第三方服务连接管理
+        .route("/ws/key", get(crate::api::get_ws_key))
+        .route("/ws/key/rotate", post(crate::api::rotate_ws_key))
+        .route("/ws/services", get(crate::api::list_ws_services))
+        // SMTP / 邮件通知
+        .route("/smtp", get(crate::api::get_smtp))
+        .route("/smtp/recipients", put(crate::api::put_recipients))
+        .route("/smtp/test", post(crate::api::test_smtp))
+        .route("/smtp/send-now", post(crate::api::send_now_smtp))
         .route("/update/check", get(crate::api::check_update))
         .route("/update/apply", post(crate::api::apply_update));
 
     // 登录/登出接口不鉴权（route_layer 只作用于已注册路由，merge 进来的不受影响）
     let auth_routes = Router::new()
         .route("/auth/login", post(crate::api::login))
-        .route("/auth/logout", post(crate::api::logout));
+        .route("/auth/logout", post(crate::api::logout))
+        // 第三方服务连接也不走面板 Cookie 鉴权，改用系统随机密钥在握手时校验
+        .route("/ws/service", get(crate::ws::ws_service_upgrade));
 
     let mw_state = state.clone();
     let protected_api = api.route_layer(axum::middleware::from_fn(

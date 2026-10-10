@@ -34,6 +34,87 @@ pub struct ServerConfig {
     /// 启用 TUN 时可选的静态虚拟 IP（CIDR，如 "10.126.0.1/24"）；为空则走 DHCP。
     #[serde(default)]
     pub static_ipv4: String,
+    /// 守护进程：服务启动后自动加入预设房间。
+    #[serde(default)]
+    pub auto_join_enabled: bool,
+    /// 自动加入使用的邀请：短码 / 完整链接 / AG1. 离线串。
+    #[serde(default)]
+    pub auto_join_code: String,
+    /// 守护进程：服务启动后自动创建预设房间（与自动加入二选一）。
+    #[serde(default)]
+    pub auto_create_enabled: bool,
+    /// 自动创建使用的预设游戏 ID。
+    #[serde(default)]
+    pub auto_create_game_id: String,
+    /// 自动创建使用的预设游戏名称。
+    #[serde(default)]
+    pub auto_create_game_name: String,
+    /// SMTP 邮件通知配置（服务器参数写配置文件，收件人可在面板维护）。
+    #[serde(default)]
+    pub smtp: SmtpConfig,
+    /// WebSocket 第三方服务连接密钥（留空则启动时自动生成随机密钥）。
+    #[serde(default)]
+    pub ws_key: String,
+}
+
+/// SMTP 发信配置。
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SmtpConfig {
+    /// 总开关（关闭则不发信）。
+    #[serde(default)]
+    pub enabled: bool,
+    /// SMTP 服务器主机，如 "smtp.qq.com"。
+    #[serde(default)]
+    pub host: String,
+    /// SMTP 端口（TLS 一般 465，STARTTLS 一般 587）。
+    #[serde(default = "default_smtp_port")]
+    pub port: u16,
+    /// 登录用户名（一般与发件邮箱一致）。
+    #[serde(default)]
+    pub username: String,
+    /// 登录密码 / 授权码。
+    #[serde(default)]
+    pub password: String,
+    /// 发件人显示名称。
+    #[serde(default = "default_from_name")]
+    pub from_name: String,
+    /// 发件邮箱地址。
+    #[serde(default)]
+    pub from_email: String,
+    /// 加密方式："tls"（隐式 TLS/465）/ "starttls"（587）/ "none"（不加密，25）。
+    #[serde(default = "default_smtp_encryption")]
+    pub encryption: String,
+    /// 收件人邮箱列表（面板可维护，写回配置文件）。
+    #[serde(default)]
+    pub recipients: Vec<String>,
+}
+
+impl Default for SmtpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            host: String::new(),
+            port: default_smtp_port(),
+            username: String::new(),
+            password: String::new(),
+            from_name: default_from_name(),
+            from_email: String::new(),
+            encryption: default_smtp_encryption(),
+            recipients: Vec::new(),
+        }
+    }
+}
+
+fn default_smtp_port() -> u16 {
+    465
+}
+
+fn default_from_name() -> String {
+    "Astral Server".into()
+}
+
+fn default_smtp_encryption() -> String {
+    "tls".into()
 }
 
 impl Default for ServerConfig {
@@ -49,8 +130,23 @@ impl Default for ServerConfig {
             disable_p2p: false,
             enable_tun: default_enable_tun(),
             static_ipv4: String::new(),
+            auto_join_enabled: false,
+            auto_join_code: String::new(),
+            auto_create_enabled: false,
+            auto_create_game_id: String::new(),
+            auto_create_game_name: String::new(),
+            smtp: SmtpConfig::default(),
+            ws_key: String::new(),
         }
     }
+}
+
+/// 生成 WebSocket 第三方服务连接密钥（32 位十六进制随机串）。
+pub fn generate_ws_key() -> String {
+    use rand::RngCore;
+    let mut buf = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut buf);
+    buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn default_enable_tun() -> bool {
@@ -164,6 +260,40 @@ disable_p2p = false
 enable_tun = true
 # 启用 TUN 时的静态虚拟 IP（CIDR 格式，如 "10.126.0.1/24"）；留空则走 DHCP
 static_ipv4 = ""
+# 守护进程：系统启动（服务启动）后自动加入下面预设的房间
+auto_join_enabled = false
+# 自动加入的邀请：短码 / 完整邀请链接 / AG1. 离线串
+auto_join_code = ""
+
+# 守护进程（二选一）：系统启动后自动创建下面预设的游戏房间。
+# 若设置了 auto_join_enabled = true 则优先执行"自动加入"，此项忽略。
+auto_create_enabled = false
+# 自动创建使用的预设游戏 ID（如我的世界 minecraft，与面板创建房间所选 ID 一致）
+auto_create_game_id = ""
+# 自动创建使用的预设游戏名称（面板展示用，与游戏 ID 对应）
+auto_create_game_name = ""
+
+# -----------------------------------------------------------------------------
+# SMTP 邮件通知：服务器重启或房间码变动时，自动把房间内容与房间码发给收件人。
+# 收件人列表也可以在 Web 面板「设置 → 邮件通知」里维护。
+# -----------------------------------------------------------------------------
+[astral_server.smtp]
+enabled = false                  # 总开关
+host = "smtp.qq.com"             # SMTP 服务器（QQ: smtp.qq.com / 163: smtp.163.com / Gmail: smtp.gmail.com）
+port = 465                       # 隐式 TLS 用 465；STARTTLS 用 587
+username = "your_mail@qq.com"    # 登录账号（一般为发件邮箱）
+password = "授权码"               # 注意是 SMTP 授权码，不是邮箱登录密码
+from_name = "Astral Server"      # 发件人显示名称
+from_email = "your_mail@qq.com"  # 发件邮箱
+encryption = "tls"               # 加密方式：tls / starttls / none
+recipients = ["a@example.com"]   # 收件人列表（可在面板编辑）
+
+# -----------------------------------------------------------------------------
+# WebSocket 第三方服务连接密钥
+# 第三方软件（如 AstrBOT 插件）通过 /api/ws/service?key=...&name=...&type=... 连接，
+# 连接成功后会出现在面板「设置 → 第三方服务」列表中。留空则启动时自动生成随机密钥。
+# -----------------------------------------------------------------------------
+# ws_key = ""
 
 # -----------------------------------------------------------------------------
 # 以下是 EasyTier 节点配置

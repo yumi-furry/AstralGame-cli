@@ -183,8 +183,11 @@ textarea { font-family:"Cascadia Code",Consolas,monospace; font-size:12px; }
 .toast { position:fixed; top:22px; right:22px; padding:12px 20px; border-radius:10px; color:#fff; font-size:14px; z-index:999; box-shadow:0 4px 16px rgba(0,0,0,.15); animation:slideIn .3s ease; max-width:420px; }
 .toast.success { background:var(--success); }
 .toast.error { background:var(--danger); }
+.toast.warning { background:var(--warning); color:#1F2937; }
 @keyframes slideIn { from{transform:translateX(80px);opacity:0} to{transform:none;opacity:1} }
 .warn-note { font-size:11px; color:var(--text2); margin-top:6px; line-height:1.5; }
+.radio-label { display:inline-flex; align-items:center; gap:4px; font-size:13px; color:var(--text); cursor:pointer; }
+.radio-label input { accent-color:var(--primary); cursor:pointer; }
 .divider { height:1px; background:var(--border); margin:18px 0; }
 .section-label { font-size:12px; color:var(--text2); text-transform:uppercase; letter-spacing:1px; margin-bottom:8px; }
 #login-view { position:fixed; inset:0; background:var(--bg); z-index:1000; display:flex; align-items:center; justify-content:center; }
@@ -224,9 +227,6 @@ textarea { font-family:"Cascadia Code",Consolas,monospace; font-size:12px; }
     <div class="avatar" id="side-avatar">🎮</div>
     <div><div class="u-name" id="side-name">服务器</div><div class="u-sub">点击编辑资料</div></div>
     <div class="edit">✎</div>
-  </div>
-  <div class="nav" style="margin-top:10px;">
-    <button class="nav-item" onclick="doCheckUpdate()" style="justify-content:center;"><span class="ico">🔄</span>检查更新</button>
   </div>
 </div>
 
@@ -354,6 +354,35 @@ textarea { font-family:"Cascadia Code",Consolas,monospace; font-size:12px; }
       </div>
 
       <div class="card">
+        <div class="card-title">开机自动运行（守护进程）</div>
+        <div class="settings-row">
+          <div><div class="settings-label">启用守护进程</div><div class="settings-desc">系统启动（服务启动）后自动加入或创建预设房间，无需人工操作</div></div>
+          <label class="switch"><input type="checkbox" id="auto-join-enabled" onchange="toggleDaemonEnabled()"><span class="slider"></span></label>
+        </div>
+        <div class="settings-row">
+          <div><div class="settings-label">运行模式</div><div class="settings-desc">加入已有房间 或 自动创建预设房间（二选一）</div></div>
+          <div style="display:flex;gap:12px;align-items:center;">
+            <label class="radio-label"><input type="radio" name="auto-mode" value="join" checked onchange="toggleAutoMode()"> 自动加入</label>
+            <label class="radio-label"><input type="radio" name="auto-mode" value="create" onchange="toggleAutoMode()"> 自动创建</label>
+          </div>
+        </div>
+        <div id="auto-join-config" class="settings-row">
+          <div><div class="settings-label">预设房间邀请</div><div class="settings-desc">短码 / 完整邀请链接 / AG1. 离线串</div></div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input type="text" id="auto-join-code" placeholder="如：ABC123" style="width:180px;padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:13px;">
+            <button class="btn btn-primary btn-sm" onclick="saveAutoJoin()">保存</button>
+          </div>
+        </div>
+        <div id="auto-create-config" class="settings-row" style="display:none;">
+          <div><div class="settings-label">预设游戏</div><div class="settings-desc" id="auto-create-desc">尚未选择，点击右侧按钮选择</div></div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn btn-primary btn-sm" onclick="showAutoCreatePicker()">选择游戏…</button>
+            <button class="btn btn-primary btn-sm" onclick="saveAutoJoin()">保存</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-title">配色方案 <span class="sub">昼间 5 种 · 夜间 5 种</span></div>
         <div class="section-label">昼间（浅色）</div>
         <div class="theme-grid" id="theme-light"></div>
@@ -382,6 +411,73 @@ textarea { font-family:"Cascadia Code",Consolas,monospace; font-size:12px; }
       <div class="card">
         <div class="card-title">实时日志</div>
         <div class="log-panel" id="settings-log-panel">加载中…</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">检查更新</div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">在线更新</div>
+            <div class="settings-desc">
+              当前版本 <b id="settings-current-version">—</b> · 对比 GitHub 最新发行版，自动下载替换并重启
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="doCheckUpdate()">检查更新</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">事件推送 <span class="sub">WebSocket</span></div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">推送地址</div>
+            <div class="settings-desc" id="ws-endpoint">—</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <span class="tag" id="ws-status" style="color:var(--text2);">未连接</span>
+            <button class="btn btn-outline btn-sm" onclick="copyWsEndpoint()">复制</button>
+          </div>
+        </div>
+        <div class="warn-note">连接后立即收到当前快照；服务器重启或房间码变动时自动推送房间内容、房间码、房间状态。调用示例见 README.md。</div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">邮件通知 <span class="sub">SMTP</span></div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-label" id="smtp-summary">SMTP 服务器（在 config.toml 配置）</div>
+            <div class="settings-desc">房间码变动时自动向下面的收件人发送通知邮件</div>
+          </div>
+          <span class="tag" id="smtp-status" style="color:var(--text2);">未启用</span>
+        </div>
+        <div style="margin-top:14px;">
+          <label class="form-label">收件人邮箱（每行一个）</label>
+          <textarea id="smtp-recipients" rows="3" style="width:100%;font-size:13px;"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button class="btn btn-primary btn-sm" onclick="saveRecipients()">保存收件人</button>
+          <button class="btn btn-outline btn-sm" onclick="sendTestEmail()">发送测试邮件</button>
+          <button class="btn btn-primary btn-sm" onclick="sendNowEmail()">一键发信</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">第三方服务 <span class="sub">WebSocket 密钥</span></div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-label">连接密钥</div>
+            <div class="settings-desc" id="ws-key-desc">加载中…</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn btn-outline btn-sm" onclick="copyWsKey()">复制密钥</button>
+            <button class="btn btn-danger btn-sm" onclick="rotateWsKey()">刷新密钥</button>
+          </div>
+        </div>
+        <div class="warn-note">第三方软件（如 AstrBOT 插件）通过 <code id="ws-service-url">/api/ws/service?key=…&amp;name=…&amp;type=…</code> 连接。刷新密钥后旧密钥立即失效，所有已连接服务将被断开。</div>
+        <div style="margin-top:14px;">
+          <div class="settings-label" style="margin-bottom:8px;">在线服务 <span class="tag" id="ws-services-count" style="color:var(--text2);">0</span></div>
+          <div id="ws-services-list" style="color:var(--text2);font-size:13px;">加载中…</div>
+        </div>
       </div>
 
       <div class="card">
@@ -472,15 +568,16 @@ textarea { font-family:"Cascadia Code",Consolas,monospace; font-size:12px; }
   </div>
 </div>
 
-<!-- 创建房间弹窗 -->
+<!-- 创建房间 / 选择预设游戏 弹窗（按模式复用） -->
 <div class="modal-mask" id="modal-create-room">
   <div class="modal">
-    <div class="modal-title">创建房间 <button class="modal-close" onclick="closeModal('modal-create-room')">✕</button></div>
+    <div class="modal-title" id="create-room-title">创建房间 <button class="modal-close" onclick="closeModal('modal-create-room')">✕</button></div>
     <div class="form-group"><input type="text" placeholder="搜索游戏" id="game-search" oninput="filterGames()"></div>
     <div id="game-list"></div>
+    <div id="preset-create-note" class="warn-note" style="display:none;">选择后保存为开机自动创建的预设房间（不立即创建）</div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal('modal-create-room')">取消</button>
-      <button class="btn btn-primary" onclick="doCreateRoom()">创建并连接</button>
+      <button class="btn btn-primary" id="create-room-btn" onclick="doCreateRoom()">创建并连接</button>
     </div>
   </div>
 </div>
@@ -558,6 +655,7 @@ function doLogin(e){
 }
 async function doLogout(){
   try{ await fetch('/api/auth/logout',{method:'POST'}); }catch(e){}
+  disconnectEventWs();
   toast('已退出登录');
   showLoginView();
 }
@@ -608,7 +706,7 @@ function themeOptHtml(t, cur) {
 
 /* ================= 图标选择 ================= */
 const ICONS = ['🎮','👾','🕹️','⛏️','🚗','🏭','🛶','⚔️','🐱','🐶','🐰','🦊','🐼','🐸','🦁','🐙','🧙','🎯','🎲','🧩','🌐','💻','🖥️','📡','⚙️','🚀'];
-let profile = { nickname:'服务器', icon:'🎮', disable_p2p:false, enable_tun:true, static_ipv4:'', avatar:null };
+let profile = { nickname:'服务器', icon:'🎮', disable_p2p:false, enable_tun:true, static_ipv4:'', avatar:null, auto_join_enabled:false, auto_join_code:'', auto_create_enabled:false, auto_create_game_id:'', auto_create_game_name:'' };
 let pendingAvatar = null;
 let avatarDirty = false;
 
@@ -695,7 +793,7 @@ function renderAvatar(el, base64, emoji) {
 async function loadProfile() {
   try {
     const d = await api('/profile');
-    profile = { nickname:d.nickname||'服务器', icon:d.icon||'🎮', disable_p2p:!!d.disable_p2p, enable_tun:d.enable_tun!==false, static_ipv4:d.static_ipv4||'', avatar:d.avatar||null };
+    profile = { nickname:d.nickname||'服务器', icon:d.icon||'🎮', disable_p2p:!!d.disable_p2p, enable_tun:d.enable_tun!==false, static_ipv4:d.static_ipv4||'', avatar:d.avatar||null, auto_join_enabled:!!d.auto_join_enabled, auto_join_code:d.auto_join_code||'', auto_create_enabled:!!d.auto_create_enabled, auto_create_game_id:d.auto_create_game_id||'', auto_create_game_name:d.auto_create_game_name||'' };
     applyProfileUI();
   } catch(e) {}
 }
@@ -711,6 +809,81 @@ function applyProfileUI() {
   document.getElementById('disable-p2p').checked = profile.disable_p2p;
   document.getElementById('enable-tun').checked = profile.enable_tun;
   document.getElementById('static-ipv4').value = profile.static_ipv4;
+  document.getElementById('auto-join-enabled').checked = profile.auto_join_enabled || profile.auto_create_enabled;
+  document.getElementById('auto-join-code').value = profile.auto_join_code;
+  // 模式：仅当某模式启用时才切换 radio；都关闭时保留用户当前选择
+  if (profile.auto_create_enabled) {
+    document.getElementsByName('auto-mode')[1].checked = true;
+  } else if (profile.auto_join_enabled) {
+    document.getElementsByName('auto-mode')[0].checked = true;
+  }
+  // 根据当前 radio 决定显示哪个配置
+  const curMode = (document.querySelector('input[name="auto-mode"]:checked')||{}).value || 'join';
+  document.getElementById('auto-join-config').style.display = curMode==='create'?'none':'';
+  document.getElementById('auto-create-config').style.display = curMode==='create'?'':'none';
+  updateAutoCreateDesc();
+  toggleDaemonEnabled();
+}
+function updateAutoCreateDesc() {
+  const el = document.getElementById('auto-create-desc');
+  el.textContent = profile.auto_create_game_id
+    ? '已选择：' + (profile.auto_create_game_name || profile.auto_create_game_id)
+    : '尚未选择，点击右侧按钮选择';
+}
+function toggleDaemonEnabled() {
+  const on = document.getElementById('auto-join-enabled').checked;
+  const radios = document.getElementsByName('auto-mode');
+  const saveBtns = document.querySelectorAll('#auto-join-config .btn, #auto-create-config .btn');
+  const codeInput = document.getElementById('auto-join-code');
+  radios.forEach(r => r.disabled = !on);
+  saveBtns.forEach(b => { b.disabled = !on; b.style.opacity = on?'':'0.5'; b.style.pointerEvents = on?'':'none'; });
+  if (codeInput) codeInput.disabled = !on;
+}
+function toggleAutoMode() {
+  const mode = document.querySelector('input[name="auto-mode"]:checked').value;
+  document.getElementById('auto-join-config').style.display = mode==='create'?'none':'';
+  document.getElementById('auto-create-config').style.display = mode==='create'?'':'none';
+}
+function showAutoCreatePicker() {
+  showCreateRoomModal(true);
+}
+
+/// 保存守护进程自动加入设置（开关或邀请串）。
+async function saveAutoJoin() {
+  const enabled = document.getElementById('auto-join-enabled').checked;
+  const mode = document.querySelector('input[name="auto-mode"]:checked').value;
+  const code = document.getElementById('auto-join-code').value.trim();
+  if (enabled && mode==='join' && !code) {
+    toast('启用自动加入时，房间邀请不能为空','error');
+    document.getElementById('auto-join-enabled').checked = false;
+    return;
+  }
+  if (enabled && mode==='create' && !profile.auto_create_game_id) {
+    toast('启用自动创建时，请先选择预设游戏','error');
+    document.getElementById('auto-join-enabled').checked = false;
+    return;
+  }
+  // 二选一：mode=create 关闭自动加入；mode=join 关闭自动创建
+  const body = mode==='create'
+    ? { auto_create_enabled:enabled, auto_create_game_id:profile.auto_create_game_id, auto_create_game_name:profile.auto_create_game_name, auto_join_enabled:false, auto_join_code:'' }
+    : { auto_join_enabled:enabled, auto_join_code:code, auto_create_enabled:false };
+  try {
+    const d = await api('/profile', { method:'PUT', body: JSON.stringify(body) });
+    console.log('[saveAutoJoin] resp:', JSON.stringify(d), 'mode:', mode);
+    profile.auto_join_enabled = d.auto_join_enabled;
+    profile.auto_join_code = d.auto_join_code;
+    profile.auto_create_enabled = d.auto_create_enabled;
+    profile.auto_create_game_id = d.auto_create_game_id;
+    profile.auto_create_game_name = d.auto_create_game_name;
+    applyProfileUI();
+    // 强制保留用户选择的模式（applyProfileUI 可能在两者都关闭时不设置 radio）
+    const radios = document.getElementsByName('auto-mode');
+    if (mode === 'create') { radios[1].checked = true; }
+    else { radios[0].checked = true; }
+    document.getElementById('auto-join-config').style.display = mode==='create'?'none':'';
+    document.getElementById('auto-create-config').style.display = mode==='create'?'':'none';
+    toast('守护进程设置已保存');
+  } catch(e) { toast(e.message,'error'); }
 }
 function openEditProfile() {
   pendingAvatar = profile.avatar;
@@ -787,6 +960,44 @@ async function saveStaticIp() {
 
 /* ================= 在线更新 ================= */
 let lastUpdateInfo = null;
+
+/// 今日日期（本地，YYYY-MM-DD）。
+function todayStr(){
+  const d = new Date();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return d.getFullYear()+'-'+m+'-'+day;
+}
+
+/// 当日首次访问面板时自动检查更新：
+/// 有更新 → 警告色 toast 提示版本；无更新 → 成功色 toast；失败 → 静默不打扰。
+/// 每天最多自动检查一次。
+async function autoDailyUpdateCheck() {
+  const KEY = 'astral_last_update_check';
+  if (localStorage.getItem(KEY) === todayStr()) return;
+  // 先标记今天，避免自动检查期间页面刷新重复请求
+  localStorage.setItem(KEY, todayStr());
+  try {
+    const d = await api('/update/check');
+    lastUpdateInfo = d;
+    updateVersionLabels(d);
+    if (d.update_available) {
+      toast('发现新版本 '+d.latest_version+'，去「设置」更新','warning');
+    } else {
+      toast('当前已是最新版本（'+d.current_version+'）');
+    }
+  } catch(e) { /* 网络/GitHub 不可达时静默 */ }
+}
+
+/// 同步各处版本号显示。
+function updateVersionLabels(d) {
+  if (!d) return;
+  const el = document.getElementById('settings-current-version');
+  if (el) el.textContent = d.current_version || '—';
+  const av = document.getElementById('about-version');
+  if (av) av.textContent = d.current_version || '—';
+}
+
 async function doCheckUpdate() {
   const content = document.getElementById('update-content');
   content.innerHTML = '<div style="text-align:center;color:var(--text2);padding:20px 0;">正在检查更新…</div>';
@@ -796,7 +1007,7 @@ async function doCheckUpdate() {
     lastUpdateInfo = d;
     const cur = d.current_version || '—';
     const latest = d.latest_version || '—';
-    document.getElementById('about-version').textContent = cur;
+    updateVersionLabels(d);
     if (d.error) {
       content.innerHTML = `<div style="padding:12px 0;"><div style="color:var(--danger);margin-bottom:8px;">检查失败</div><div style="color:var(--text2);font-size:13px;">${esc(d.error)}</div></div>`;
       return;
@@ -874,9 +1085,21 @@ function imgFail(el, emoji) {
   el.replaceWith(span);
 }
 async function showCreateRoom() {
+  showCreateRoomModal(false);
+}
+function showCreateRoomModal(isPreset) {
+  window.__createMode = isPreset ? 'preset' : 'now';
+  document.getElementById('create-room-title').innerHTML =
+    (isPreset ? '选择预设游戏' : '创建房间') + ' <button class="modal-close" onclick="closeModal(\'modal-create-room\')">✕</button>';
+  document.getElementById('create-room-btn').textContent = isPreset ? '设为预设房间' : '创建并连接';
+  document.getElementById('preset-create-note').style.display = isPreset ? '' : 'none';
+  if (isPreset && profile.auto_create_game_id) {
+    selectedGame = profile.auto_create_game_id;
+  }
   showModal('modal-create-room');
   if (!games.length) {
-    try { const d = await api('/games'); games = d.games || []; } catch(e){ toast(e.message,'error'); }
+    api('/games').then(d => { games = d.games || []; renderGames(); }).catch(e => toast(e.message,'error'));
+    return;
   }
   renderGames();
 }
@@ -889,6 +1112,15 @@ function filterGames(){ const q=document.getElementById('game-search').value.toL
 async function doCreateRoom() {
   if(!selectedGame) return toast('请选择游戏','error');
   const g = games.find(x=>x.id===selectedGame);
+  if (window.__createMode === 'preset') {
+    // 设为预设房间：只保存配置，不立即创建
+    profile.auto_create_game_id = g.id;
+    profile.auto_create_game_name = g.name;
+    updateAutoCreateDesc();
+    closeModal('modal-create-room');
+    toast('已选择预设游戏：' + g.name);
+    return;
+  }
   try {
     const d = await api('/room/create',{method:'POST',body:JSON.stringify({game_id:g.id,game_name:g.name})});
     if(d.ok){ currentRoom = d.room; shareUrl = d.share_url||''; closeModal('modal-create-room'); toast('房间创建成功'); showRoomUI(); startPolling(); }
@@ -1062,10 +1294,173 @@ async function doSaveServer(){
 }
 
 /* ================= 设置 ================= */
+/* ================= WebSocket 事件推送 ================= */
+let eventWs = null;
+let wsEnabled = false;
+
+function wsEndpoint() {
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  return proto + location.host + '/api/ws';
+}
+function renderWsEndpoint() {
+  const el = document.getElementById('ws-endpoint');
+  if (el) el.textContent = wsEndpoint();
+}
+function setWsStatus(connected) {
+  const el = document.getElementById('ws-status');
+  if (!el) return;
+  if (connected) { el.textContent = '已连接'; el.style.color = 'var(--success)'; }
+  else { el.textContent = '未连接'; el.style.color = 'var(--danger)'; }
+}
+async function copyWsEndpoint() {
+  if (await copyText(wsEndpoint())) toast('推送地址已复制');
+}
+function connectEventWs() {
+  wsEnabled = true;
+  renderWsEndpoint();
+  if (eventWs) { try { eventWs.close(); } catch(e){} }
+  let ws;
+  try { ws = new WebSocket(wsEndpoint()); }
+  catch(e) { setWsStatus(false); scheduleReconnect(); return; }
+  eventWs = ws;
+  ws.onopen = () => setWsStatus(true);
+  ws.onerror = () => setWsStatus(false);
+  ws.onclose = () => {
+    setWsStatus(false);
+    eventWs = null;
+    scheduleReconnect();
+  };
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch(e) { return; }
+    handleRoomEvent(msg);
+  };
+}
+function scheduleReconnect() {
+  // 已退出登录则停止重连
+  if (!wsEnabled) return;
+  setTimeout(() => { if (wsEnabled) connectEventWs(); }, 5000);
+}
+function disconnectEventWs() {
+  wsEnabled = false;
+  if (eventWs) { try { eventWs.close(); } catch(e){} eventWs = null; }
+}
+
+/// 处理服务端推送：同步房间状态；房间码实际变动时提示。
+function handleRoomEvent(msg) {
+  if (!msg || !msg.event) return;
+  if (msg.room) {
+    const before = currentRoom ? (currentRoom.short_code || '') : '';
+    const after = msg.room.short_code || '';
+    currentRoom = msg.room;
+    if (document.getElementById('connect-room').style.display !== 'none') showRoomUI();
+    // 快照（连接后首包）与未实际变动的事件不重复提示
+    if (msg.event !== 'snapshot' && msg.event !== 'server.started' && after && after !== before) {
+      toast('房间码已更新：' + after);
+    }
+  } else if (msg.event === 'room.left') {
+    currentRoom = null;
+    if (document.getElementById('connect-room').style.display !== 'none') showHomeUI();
+  }
+}
+
+/* ================= SMTP 邮件通知 ================= */
+async function loadSmtp() {
+  try {
+    const d = await api('/smtp');
+    document.getElementById('smtp-recipients').value = (d.recipients || []).join('\n');
+    const stEl = document.getElementById('smtp-status');
+    if (d.enabled) { stEl.textContent = '已启用'; stEl.style.color = 'var(--success)'; }
+    else { stEl.textContent = '未启用'; stEl.style.color = 'var(--text2)'; }
+    const sum = document.getElementById('smtp-summary');
+    if (d.host) {
+      sum.textContent = d.host + ':' + d.port + ' · ' + d.encryption
+        + (d.password_set ? ' · 授权码已设置' : ' · 未设置授权码');
+    } else {
+      sum.textContent = '未配置（请编辑 config.toml）';
+    }
+  } catch(e) {}
+}
+async function saveRecipients() {
+  const list = document.getElementById('smtp-recipients').value
+    .split('\n').map(s => s.trim()).filter(Boolean);
+  try {
+    const d = await api('/smtp/recipients', {
+      method: 'PUT', body: JSON.stringify({ recipients: list })
+    });
+    document.getElementById('smtp-recipients').value = (d.recipients || []).join('\n');
+    toast('收件人已保存（共 ' + (d.recipients || []).length + ' 个）');
+  } catch(e) { toast(e.message, 'error'); }
+}
+async function sendTestEmail() {
+  toast('正在发送测试邮件…');
+  try {
+    await api('/smtp/test', { method: 'POST' });
+    toast('测试邮件已发送，请查收');
+  } catch(e) { toast(e.message, 'error'); }
+}
+async function sendNowEmail() {
+  toast('正在发送房间详情邮件…');
+  try {
+    const d = await api('/smtp/send-now', { method: 'POST' });
+    toast(d.message || '房间详情邮件已发送');
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+/* ================= 第三方服务（WebSocket 密钥） ================= */
+async function loadWsServices() {
+  try {
+    const d = await api('/ws/key');
+    document.getElementById('ws-key-desc').textContent = d.key || '（未配置）';
+    const url = document.getElementById('ws-service-url');
+    if (url) {
+      const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+      url.textContent = proto + location.host + '/api/ws/service?key=' + (d.key||'…') + '&name=名称&type=类型';
+    }
+  } catch(e) {}
+  try {
+    const d = await api('/ws/services');
+    const list = d.services || [];
+    document.getElementById('ws-services-count').textContent = list.length;
+    const el = document.getElementById('ws-services-list');
+    if (!list.length) {
+      el.innerHTML = '<div style="color:var(--text2);padding:10px 0;">暂无已连接的服务</div>';
+    } else {
+      el.innerHTML = list.map(s => {
+        const first = s.first_connected_at ? new Date(s.first_connected_at*1000).toLocaleString() : '-';
+        return `<div class="settings-row">
+          <div>
+            <div class="settings-label">${esc(s.name)} <span class="tag">${esc(s.service_type)}</span></div>
+            <div class="settings-desc">初次连接 ${esc(first)} · 远端 ${esc(s.remote_addr)}</div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  } catch(e) {}
+}
+async function copyWsKey() {
+  const el = document.getElementById('ws-key-desc');
+  if (await copyText(el.textContent)) toast('连接密钥已复制');
+}
+async function rotateWsKey() {
+  if (!confirm('刷新后旧密钥立即失效，所有已连接的第三方服务将被断开。确定刷新？')) return;
+  try {
+    const d = await api('/ws/key/rotate', { method: 'POST' });
+    document.getElementById('ws-key-desc').textContent = d.key;
+    toast(`密钥已刷新，${d.disconnected||0} 个已连接服务被断开`);
+    loadWsServices();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+
 async function loadSettings(){
   await loadProfile();
   pollStatus();
   loadCredentials();
+  loadSmtp();
+  loadWsServices();
+  renderWsEndpoint();
+  if (!eventWs && wsEnabled) connectEventWs();
 }
 async function loadConfig(){ try{ const d=await api('/config'); document.getElementById('config-editor').value=d.config; }catch(e){ toast(e.message,'error'); } }
 async function saveConfig(){
@@ -1102,6 +1497,8 @@ async function initApp(){
   renderThemeOptions();
   try { await api('/status'); } catch(e) { return; }
   hideLoginView();
+  // 建立 WebSocket 事件推送（房间码变动实时同步）
+  connectEventWs();
   try {
     const g = await api('/games');
     games = g.games || [];
@@ -1109,6 +1506,8 @@ async function initApp(){
   } catch(e){}
   await loadProfile();
   pollStatus();
+  // 当日首次访问自动检查更新（后台执行，不阻塞页面）
+  autoDailyUpdateCheck();
   try {
     const d = await api('/room/current');
     if(d.room){ currentRoom = d.room; shareUrl = d.share_url||''; showRoomUI(); startPolling(); }

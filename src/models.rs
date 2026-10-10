@@ -46,3 +46,20 @@ pub struct ActiveRoom {
     pub offline_invite: Option<String>,
     pub peers: Vec<PeerEndpoint>,
 }
+
+/// 已连接 WebSocket 的第三方服务（如 AstrBOT 插件）。
+#[derive(Debug, Clone, Serialize)]
+pub struct WsServiceInfo {
+    /// 连接唯一 ID。
+    pub id: String,
+    /// 服务名称（连接时上报）。
+    pub name: String,
+    /// 服务类型（连接时上报，如 "AstrBOT"）。
+    pub service_type: String,
+    /// 初次连接时间（unix 秒）。
+    pub first_connected_at: u64,
+    /// 本次连接时间（unix 秒）。
+    pub connected_at: u64,
+    /// 远程地址。
+    pub remote_addr: String,
+}
