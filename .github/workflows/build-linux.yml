@@ -1,4 +1,4 @@
-# CI：为 amd64 / arm64 两个架构编译 release 二进制并打包 .deb，
+# CI：为 amd64（Ubuntu / Debian 系列）编译 release 二进制并打包 .deb，
 # 推送 v* 标签时额外创建 GitHub Release（资产即在线更新检查的下载来源）。
 name: Build Linux binaries & deb packages
 
@@ -16,14 +16,12 @@ jobs:
     name: build (${{ matrix.arch }})
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false   # 两个架构互不影响：一个失败另一个照常出包
+      fail-fast: false   # 单一架构无需 fail-fast（保留注释语义）
       matrix:
-        # deb 架构名 与 Rust target triple 的对照矩阵。
+        # 仅构建 amd64：生产环境只支持 Ubuntu 系列（x86_64），无需 arm64。
         include:
           - arch: amd64
             target: x86_64-unknown-linux-gnu
-          - arch: arm64
-            target: aarch64-unknown-linux-gnu
 
     steps:
       - name: Checkout
@@ -32,11 +30,8 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update
-          # protoc（easytier 用 prost/tonic-build 编译 proto 需要）、C 编译器、跨架构 gcc
+          # protoc（easytier 用 prost/tonic-build 编译 proto 需要）与 C 编译器
           sudo apt-get install -y build-essential protobuf-compiler pkg-config
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu
-          fi
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -54,9 +49,6 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('Cargo.lock') }}
 
       - name: Build release binary
-        env:
-          # 跨架构时启用 gcc 链接器
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Assemble deb package
@@ -66,11 +58,12 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          # 每个架构一个 artifact，内含裸二进制与 .deb 包。
+          # artifact 内含裸二进制、.deb 与命名合规的在线更新二进制。
           name: astral-server-${{ matrix.arch }}
           path: |
             target/${{ matrix.target }}/release/astral-server
             dist/*.deb
+            dist/astral-server-linux-*
 
   release:
     name: create GitHub release
@@ -87,7 +80,7 @@ jobs:
           path: artifacts
 
       - name: Create release
-        # 全部产物（两架构二进制+deb）递归上传到该 tag 的 Release。
+        # 全部产物（amd64 二进制 + .deb + 在线更新裸二进制）递归上传到该 tag 的 Release。
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
