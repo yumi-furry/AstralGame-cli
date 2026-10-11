@@ -1,10 +1,12 @@
+# CI：为 amd64 / arm64 两个架构编译 release 二进制并打包 .deb，
+# 推送 v* 标签时额外创建 GitHub Release（资产即在线更新检查的下载来源）。
 name: Build Linux binaries & deb packages
 
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
+      - 'v*'          # 打标签即发布（触发 release 作业）
+  workflow_dispatch:  # 也支持 Actions 页面手动触发（只构建不上架 Release）
 
 env:
   CARGO_TERM_COLOR: always
@@ -14,8 +16,9 @@ jobs:
     name: build (${{ matrix.arch }})
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: false   # 两个架构互不影响：一个失败另一个照常出包
       matrix:
+        # deb 架构名 与 Rust target triple 的对照矩阵。
         include:
           - arch: amd64
             target: x86_64-unknown-linux-gnu
@@ -43,6 +46,7 @@ jobs:
       - name: Cache cargo
         uses: actions/cache@v4
         with:
+          # 缓存 crate 源、git 依赖与编译产物；Cargo.lock 变动则缓存失效。
           path: |
             ~/.cargo/registry
             ~/.cargo/git
@@ -56,11 +60,13 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Assemble deb package
+        # 复用本地打deb脚本（此时二进制已存在，脚本会跳过编译直接打包）。
         run: bash deploy/build-deb.sh ${{ matrix.arch }} ${{ matrix.target }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
+          # 每个架构一个 artifact，内含裸二进制与 .deb 包。
           name: astral-server-${{ matrix.arch }}
           path: |
             target/${{ matrix.target }}/release/astral-server
@@ -68,11 +74,12 @@ jobs:
 
   release:
     name: create GitHub release
+    # 仅标签推送执行；手动触发不创建 Release。
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write   # softprops/action-gh-release 上传资产需要写权限
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -80,6 +87,7 @@ jobs:
           path: artifacts
 
       - name: Create release
+        # 全部产物（两架构二进制+deb）递归上传到该 tag 的 Release。
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*

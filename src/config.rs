@@ -1,3 +1,15 @@
+//! =============================================================================
+//! 配置模块：config.toml 的加载、解析、写回，以及示例配置生成。
+//!
+//! 一份 config.toml 同时承载两类内容：
+//! * `[astral_server]` 表 —— 本服务（Web 管理端、守护进程、SMTP、ws_key 等）的配置，
+//!   反序列化为 [`ServerConfig`]；
+//! * 其余所有表（instance_name、[network_identity]、[[peer]]、[flags] 等）——
+//!   标准 EasyTier 配置，解析时原样剥离出来，以 TOML 文本形式交给内核加载。
+//!
+//! 面板"保存设置"时只重写 `[astral_server]` 表，EasyTier 部分保持用户手改内容不变。
+//! =============================================================================
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -7,13 +19,16 @@ use serde::{Deserialize, Serialize};
 /// Web 管理端 / 服务自身的配置，放在顶层 `[astral_server]` 表里。
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ServerConfig {
+    /// Web 管理端监听地址（0.0.0.0 对全网卡开放，127.0.0.1 仅本机）。
     #[serde(default = "default_web_bind")]
     pub web_bind: String,
+    /// Web 管理端监听端口。
     #[serde(default = "default_web_port")]
     pub web_port: u16,
-    /// 为空则关闭 Basic Auth。
+    /// 鉴权用户名；为空则关闭鉴权（生产环境务必设置）。
     #[serde(default)]
     pub username: String,
+    /// 鉴权密码（同时用于 Cookie 登录校验与 Basic Auth 兼容）。
     #[serde(default)]
     pub password: String,
     /// tracing 日志级别（trace/debug/info/warn/error）。
@@ -105,14 +120,17 @@ impl Default for SmtpConfig {
     }
 }
 
+/// SMTP 默认端口：隐式 TLS（465）。
 fn default_smtp_port() -> u16 {
     465
 }
 
+/// 发件人默认显示名称。
 fn default_from_name() -> String {
     "Astral Server".into()
 }
 
+/// 默认加密方式：隐式 TLS。
 fn default_smtp_encryption() -> String {
     "tls".into()
 }
@@ -149,37 +167,45 @@ pub fn generate_ws_key() -> String {
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// 默认启用 TUN 虚拟网卡（MC 局域网发现等场景依赖虚拟 IP）。
 fn default_enable_tun() -> bool {
     true
 }
 
+/// 默认房间昵称（同时作为 EasyTier hostname）。
 fn default_nickname() -> String {
     "astral-server".into()
 }
 
+/// 默认房间图标 emoji。
 fn default_icon() -> String {
     "🎮".into()
 }
 
+/// 默认监听所有网卡。
 fn default_web_bind() -> String {
     "0.0.0.0".into()
 }
 
+/// 默认 Web 端口 8080。
 fn default_web_port() -> u16 {
     8080
 }
 
+/// 默认日志级别。
 fn default_log_level() -> String {
     "info".into()
 }
 
 /// 从磁盘加载并解析后的配置。
 pub struct LoadedConfig {
+    /// 本服务的配置（[astral_server] 表）。
     pub server: ServerConfig,
     /// 剥离 `[astral_server]` 后、交给 EasyTier 的实例 TOML 文本。
     pub instance_toml: String,
 }
 
+/// 读取指定路径的 config.toml 并解析为两部分。
 pub fn load(path: &PathBuf) -> Result<LoadedConfig> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("无法读取配置文件 {}", path.display()))?;
@@ -190,15 +216,18 @@ pub fn load(path: &PathBuf) -> Result<LoadedConfig> {
 pub fn parse(raw: &str) -> Result<LoadedConfig> {
     let value: toml::Value = toml::from_str(raw).context("配置文件不是合法 TOML")?;
 
+    // 有 [astral_server] 表则反序列化；缺省时整份配置都走默认值。
     let server = match value.get("astral_server") {
         Some(s) => s.clone().try_into::<ServerConfig>().context("解析 [astral_server] 失败")?,
         None => ServerConfig::default(),
     };
 
+    // 从根表移除 [astral_server]，剩下的就是标准 EasyTier 配置。
     let mut easytier_value = value;
     if let toml::Value::Table(t) = &mut easytier_value {
         t.remove("astral_server");
     }
+    // 重新序列化为美化后的 TOML 文本，供 TomlConfigLoader 直接加载。
     let instance_toml = toml::to_string_pretty(&easytier_value)?;
 
     Ok(LoadedConfig {
@@ -208,9 +237,13 @@ pub fn parse(raw: &str) -> Result<LoadedConfig> {
 }
 
 /// 将 [ServerConfig] 写回 config.toml 的 `[astral_server]` 节，其余 EasyTier 内容原样保留。
+///
+/// 做法：读入现有文件 → 反序列化为 toml::Value → 整体替换 astral_server 键 → 写回。
+/// 这样面板保存设置不会冲掉用户手写的 [network_identity]、[[peer]] 等段落。
 pub fn save(path: &Path, server: &ServerConfig) -> Result<()> {
     let raw = fs::read_to_string(path).unwrap_or_default();
     let mut value: toml::Value = if raw.trim().is_empty() {
+        // 文件尚不存在或为空时，从空表开始构建。
         toml::Value::Table(Default::default())
     } else {
         toml::from_str(&raw).context("配置文件不是合法 TOML")?
@@ -220,12 +253,14 @@ pub fn save(path: &Path, server: &ServerConfig) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("配置根节点不是表"))?;
     let server_value: toml::Value =
         toml::Value::try_from(server).context("序列化 ServerConfig 失败")?;
+    // insert 会覆盖同名旧表，其余键不动。
     table.insert("astral_server".to_string(), server_value);
     let out = toml::to_string_pretty(&value).context("序列化配置失败")?;
     fs::write(path, out).context("写入配置文件失败")?;
     Ok(())
 }
 
+/// 将内置的示例配置写入指定路径（`astral-server init` 子命令使用），自动创建父目录。
 pub fn write_example_config(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {

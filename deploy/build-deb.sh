@@ -10,13 +10,17 @@
 # 前置: 已安装 dpkg-deb（Ubuntu/Debian 自带）；若二进制不存在会自动 cargo build。
 set -euo pipefail
 
+# 参数 1：deb 包架构名（dpkg 约定，默认 amd64；ARM 传 arm64）。
+# 参数 2：Rust target triple（默认 x86_64；ARM 传 aarch64-unknown-linux-gnu）。
 ARCH="${1:-amd64}"
 TARGET="${2:-x86_64-unknown-linux-gnu}"
 
 PKG="astral-server"
+# 版本号直接取自 Cargo.toml（形如 1.4.2-3），保证包版本与二进制一致。
 VERSION="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
 BIN="target/${TARGET}/release/astral-server"
 
+# 二进制不存在时自动编译（交叉 target 缺则尝试 rustup 安装，失败不阻断）。
 if [ ! -f "$BIN" ]; then
     echo "[build-deb] 未找到 ${BIN}，开始编译（target=${TARGET}）..."
     if [ "$TARGET" != "x86_64-unknown-linux-gnu" ]; then
@@ -25,18 +29,22 @@ if [ ! -f "$BIN" ]; then
     cargo build --release --target "$TARGET"
 fi
 
+# 组装符合 FHS 的包目录树（dist/<包名>_<版本>_<架构>/ 即 deb 根）。
 ROOT="$(pwd)/dist/${PKG}_${VERSION}_${ARCH}"
 rm -rf "$ROOT"
 mkdir -p "$ROOT/DEBIAN" "$ROOT/usr/bin" "$ROOT/etc/astral-server" "$ROOT/etc/systemd/system"
 
+# 主程序安装到 /usr/bin（deb 布局；单目录部署时用户也可直接拷到 /opt）。
 cp "$BIN" "$ROOT/usr/bin/astral-server"
 chmod 755 "$ROOT/usr/bin/astral-server"
 
 # 用二进制自带的示例配置作为包内默认配置（与 astral-server init 保持一致）
 "$BIN" init --config "$ROOT/etc/astral-server/config.toml"
 
+# 安装 systemd 单元文件。
 cp deploy/astral-server.service "$ROOT/etc/systemd/system/astral-server.service"
 
+# DEBIAN/control：dpkg 包元数据（Depends 仅 libc6，其余为静态链接）。
 cat > "$ROOT/DEBIAN/control" <<EOF
 Package: ${PKG}
 Version: ${VERSION}
@@ -55,6 +63,7 @@ cat > "$ROOT/DEBIAN/conffiles" <<EOF
 /etc/astral-server/config.toml
 EOF
 
+# postinst：安装/升级后让 systemd 识别新单元，并打印上手提示（不自动 enable）。
 cat > "$ROOT/DEBIAN/postinst" <<'EOF'
 #!/bin/sh
 set -e
@@ -69,6 +78,7 @@ exit 0
 EOF
 chmod 755 "$ROOT/DEBIAN/postinst"
 
+# prerm：卸载前停止并禁用服务（报错忽略，兼容无 systemd 的容器）。
 cat > "$ROOT/DEBIAN/prerm" <<'EOF'
 #!/bin/sh
 set -e
@@ -80,6 +90,7 @@ exit 0
 EOF
 chmod 755 "$ROOT/DEBIAN/prerm"
 
+# --root-owner-group：包内文件属主统一为 root:root，不携带构建机 uid。
 mkdir -p dist
 dpkg-deb --build --root-owner-group "$ROOT" "dist/${PKG}_${VERSION}_${ARCH}.deb"
 echo "[build-deb] 已生成: dist/${PKG}_${VERSION}_${ARCH}.deb"

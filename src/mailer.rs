@@ -69,6 +69,7 @@ pub async fn send_room_notification(
     share_url: &str,
     snap: &Snapshot,
 ) -> Result<(), String> {
+    // 邀请码优先短码；无短码时把离线串填入同一变量，并切换提示文案。
     let (code, code_hint) = match room {
         Some(r) => match &r.short_code {
             Some(c) => (h(c), "房间码（短码）".to_string()),
@@ -83,6 +84,7 @@ pub async fn send_room_notification(
         Some(r) => (h(&r.game_id), h(&r.game_name)),
         None => ("-".to_string(), "无房间".to_string()),
     };
+    // 模板变量表：所有插值在此统一 HTML 转义（render_template 不再转义）。
     let vars: [(&str, String); 10] = [
         ("EVENT_TITLE", h(event_title)),
         ("EVENT_DESC", h(event_desc)),
@@ -122,17 +124,21 @@ pub async fn send_test(smtp: &SmtpConfig) -> Result<(), String> {
     Ok(())
 }
 
+/// 构建 MIME 邮件：发件人 + 全部收件人 + 主题，
+/// 正文使用 alternative 多部分（纯文本 + HTML，客户端自行选择渲染）。
 fn build_message(
     smtp: &SmtpConfig,
     subject: &str,
     plain: String,
     html: String,
 ) -> Result<Message, String> {
+    // "显示名 <邮箱>" 格式解析为发件信箱。
     let from: Mailbox = format!("{} <{}>", smtp.from_name, smtp.from_email)
         .parse()
         .map_err(|e| format!("发件人地址无效: {e}"))?;
 
     let mut builder = Message::builder().from(from);
+    // 所有收件人都放在 To（本系统无密送需求）。
     for addr in &smtp.recipients {
         let mbox: Mailbox = addr.parse().map_err(|e| format!("收件人地址 {addr} 无效: {e}"))?;
         builder = builder.to(mbox);
@@ -148,13 +154,18 @@ fn build_message(
         .map_err(|e| format!("构建邮件失败: {e}"))
 }
 
+/// 按配置构建 SMTP 传输：encryption 支持 starttls / none / 隐式 TLS(默认)；
+/// username 非空时附带登录凭据（为空则尝试匿名投递，适用于内网中继）。
 fn build_transport(smtp: &SmtpConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
     let mut builder = match smtp.encryption.as_str() {
+        // STARTTLS：先明文握手再升级 TLS（常见 587 端口）。
         "starttls" => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&smtp.host)
             .map_err(|e| e.to_string())?
             .port(smtp.port),
+        // 完全不加密（仅建议内网调试使用）。
         "none" => AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&smtp.host)
             .port(smtp.port),
+        // 隐式 TLS（常见 465 端口），也是默认选项。
         _ => AsyncSmtpTransport::<Tokio1Executor>::relay(&smtp.host)
             .map_err(|e| e.to_string())?
             .port(smtp.port),

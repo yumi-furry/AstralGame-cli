@@ -1,5 +1,6 @@
-//! JSON 文件持久化：服务器列表。
-//! 数据文件与可执行文件放在同一目录，便于管理。
+//! ==== 本地文件持久化模块 ====
+//! JSON 文件持久化：服务器列表 servers.json 与头像 avatar.bin。
+//! 所有数据文件与可执行文件放在同一目录，单目录部署、便于备份与打包。
 
 use std::fs;
 use std::path::PathBuf;
@@ -8,7 +9,7 @@ use anyhow::{Context, Result};
 
 use crate::models::ServerEntry;
 
-/// 获取可执行文件所在目录。
+/// 获取可执行文件所在目录；取不到（极少数环境）时回退为当前目录 "."。
 fn exe_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -16,10 +17,15 @@ fn exe_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// servers.json 的完整路径（exe 同目录）。
 fn servers_path() -> PathBuf {
     exe_dir().join("servers.json")
 }
 
+/// 读取服务器列表。
+/// 文件不存在（首次运行）→ 返回内置默认列表；
+/// 文件存在但内容损坏 → serde 反序列化失败时返回空列表（unwrap_or_default），
+/// 避免坏数据导致整个面板不可用。
 pub fn load_servers() -> Vec<ServerEntry> {
     let path = servers_path();
     match fs::read_to_string(&path) {
@@ -28,6 +34,7 @@ pub fn load_servers() -> Vec<ServerEntry> {
     }
 }
 
+/// 全量覆盖写入服务器列表（pretty JSON）。
 pub fn save_servers(list: &[ServerEntry]) -> Result<()> {
     let path = servers_path();
     let json = serde_json::to_string_pretty(list).context("序列化服务器列表失败")?;
@@ -35,6 +42,7 @@ pub fn save_servers(list: &[ServerEntry]) -> Result<()> {
     Ok(())
 }
 
+/// 首次运行的内置服务器：EasyTier 官方公共中继。
 fn default_servers() -> Vec<ServerEntry> {
     vec![ServerEntry {
         id: 1,
@@ -45,6 +53,7 @@ fn default_servers() -> Vec<ServerEntry> {
     }]
 }
 
+/// avatar.bin 的完整路径（原始图片字节，≤512KB，格式不限由前端识别）。
 fn avatar_path() -> PathBuf {
     exe_dir().join("avatar.bin")
 }

@@ -1,40 +1,61 @@
+# =============================================================================
+# Cargo 包清单：astral-server（AstralGame 无头服务器 + 内嵌 Web 管理端）
+# =============================================================================
+
 [package]
 name = "astral-server"
+# semver 合法写法用 "-"；运行时显示时由 update::current_version() 还原为 "1.4.2_3"。
 version = "1.4.2-3"
 edition = "2021"
 description = "Astral Game P2P server (headless) with embedded web management"
 license = "MIT"
 
+# 唯一可执行目标：src/main.rs，输出二进制名 astral-server。
 [[bin]]
 name = "astral-server"
 path = "src/main.rs"
 
 [dependencies]
-# Astral 的 EasyTier fork（含 astral_app_rpc / 凭据管理 / secure_mode 处理）
+# ---------- 组网内核 ----------
+# Astral 的 EasyTier fork（含 astral_app_rpc / 凭据管理 / secure_mode 处理），
+# 锁定到指定 commit 以保证 API 与行为可复现。
 easytier = { git = "https://github.com/ldoubil/EasyTier.git", rev = "d76c8db55613800f9d8064af7504e80e921968d8" }
-tokio = { version = "1", features = ["full"] }
-axum = { version = "0.7", features = ["ws"] }
-# SMTP 邮件（rustls，无需系统 OpenSSL）
-lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder"] }
-clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-toml = "0.8"
-anyhow = "1"
-base64 = "0.22"
-cidr = "0.2"
-sha2 = "0.10"
-uuid = { version = "1", features = ["v4"] }
-x25519-dalek = { version = "2", features = ["static_secrets"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-rand = "0.8"
-futures-util = "0.3"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
-url = "2"
 
+# ---------- 异步运行时 / Web 框架 ----------
+tokio = { version = "1", features = ["full"] }          # 异步运行时（信号、任务、TCP、同步原语等全特性）
+axum = { version = "0.7", features = ["ws"] }           # HTTP 框架，启用 ws 特性做 WebSocket 升级
+
+# ---------- 邮件 ----------
+# SMTP 邮件（rustls，无需系统 OpenSSL）：smtp-transport 发信、tokio1-rustls-tls 加密、builder 构建邮件。
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder"] }
+
+# ---------- CLI / 序列化 ----------
+clap = { version = "4", features = ["derive"] }         # 命令行参数解析（run/init/export-web）
+serde = { version = "1", features = ["derive"] }        # 结构体 ↔ JSON/TOML 序列化派生
+serde_json = "1"                                        # JSON 编解码（API 响应、邀请载荷）
+toml = "0.8"                                            # config.toml 解析与序列化
+anyhow = "1"                                            # 错误处理（通用 Result，附加 context）
+
+# ---------- 编码 / 加密 / 随机数 ----------
+base64 = "0.22"                                         # Basic Auth、AG1. 离线串、头像、公钥等编解码
+cidr = "0.2"                                            # 校验静态虚拟 IP 是否为合法 CIDR
+sha2 = "0.10"                                           # 头像 sha256 指纹（peer-RPC 增量下发）
+uuid = { version = "1", features = ["v4"] }             # 会话 token、第三方连接 ID
+x25519-dalek = { version = "2", features = ["static_secrets"] } # 由凭据私钥推导公钥展示
+rand = "0.8"                                            # 随机网络名/密钥/ws_key 生成
+
+# ---------- 日志 ----------
+tracing = "0.1"                                         # 日志门面（info!/warn! 等宏）
+tracing-subscriber = { version = "0.3", features = ["env-filter"] } # 日志输出与级别过滤
+
+# ---------- 其他工具 ----------
+futures-util = "0.3"                                    # WebSocket 的 StreamExt/SinkExt
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false } # HTTP 客户端（短码服务、GitHub 更新）
+url = "2"                                               # 解析邀请链接中的 ?c= 参数
+
+# ---------- release 优化：用编译时间换更小更快的二进制 ----------
 [profile.release]
-opt-level = 3
-lto = "thin"
-codegen-units = 1
-strip = true
+opt-level = 3       # 最高优化级别
+lto = "thin"        # 薄 LTO，跨 crate 内联优化同时控制链接耗时
+codegen-units = 1   # 单代码生成单元，换取更好的运行期优化
+strip = true        # 剥离符号表，显著减小二进制体积

@@ -1,11 +1,17 @@
 <!DOCTYPE html>
+<!--
+  Astral Server 单文件管理面板：
+  - 结构：<style> 全部样式 + <body> 侧边栏/四个页面(联机/服务器/设置/关于)/各模态框 + <script> 全部逻辑；
+  - 鉴权：Cookie 会话（401 自动弹登录浮层）；实时更新走 /api/ws（5 秒断线重连）；
+  - 编译期由 Rust 的 include_str! 内嵌进二进制，部署只需一个可执行文件。
+-->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Astral Server</title>
 <style>
-/* ===== 主题变量（默认紫罗兰/浅色，与 chmlfrp 一致） ===== */
+/* ===== 主题变量（默认紫罗兰/浅色） ===== */
 :root {
   --primary: #8B5CF6;
   --primary-hover: #7C3AED;
@@ -634,8 +640,10 @@ textarea { font-family:"Cascadia Code",Consolas,monospace; font-size:12px; }
 
 <script>
 /* ================= 登录验证（Cookie 会话） ================= */
+// 登录浮层仅靠 .hidden 类切换显隐；401 响应会在 api() 中自动弹出该浮层。
 function showLoginView(){ const v=document.getElementById('login-view'); if(v) v.classList.remove('hidden'); }
 function hideLoginView(){ const v=document.getElementById('login-view'); if(v) v.classList.add('hidden'); }
+// 提交登录表单：成功由服务端 Set-Cookie，随后初始化整个应用。
 function doLogin(e){
   e.preventDefault();
   const u = document.getElementById('login-username').value.trim();
@@ -653,6 +661,7 @@ function doLogin(e){
     })
     .catch(()=>{ err.textContent = '无法连接服务器'; });
 }
+// 退出登录：通知服务端清 Cookie（失败忽略），断开 WS 并显示登录浮层。
 async function doLogout(){
   try{ await fetch('/api/auth/logout',{method:'POST'}); }catch(e){}
   disconnectEventWs();
@@ -660,11 +669,13 @@ async function doLogout(){
   showLoginView();
 }
 /* ================= 主题引擎 ================= */
+// 暗色主题的公共底色变量，各暗色主题只覆盖主色相关变量。
 const DARK_BASE = {
   '--bg':'#12121A','--bg-sidebar':'#181722','--bg-card':'#1E1D2B',
   '--text':'#E5E7EB','--text2':'#9CA3AF','--border':'#2C2B3A',
   '--success':'#34D399','--danger':'#F87171','--warning':'#FBBF24'
 };
+// 全部可用主题：5 个浅色 + 5 个暗色，每项含 id/名称/是否暗色/CSS 变量表。
 const THEMES = [
   {id:'violet', name:'紫罗兰', dark:false, vars:{'--primary':'#8B5CF6','--primary-hover':'#7C3AED','--primary-soft':'#EDE9FE','--primary-softer':'#F5F3FF','--bg':'#F7F6FB','--bg-sidebar':'#FBFAFF','--bg-card':'#FFFFFF','--text':'#1F2937','--text2':'#6B7280','--border':'#E5E7EB','--success':'#10B981','--danger':'#EF4444','--warning':'#F59E0B'}},
   {id:'blue', name:'晴空蓝', dark:false, vars:{'--primary':'#3B82F6','--primary-hover':'#2563EB','--primary-soft':'#DBEAFE','--primary-softer':'#EFF6FF','--bg':'#F5F8FC','--bg-sidebar':'#FAFBFE','--bg-card':'#FFFFFF','--text':'#1F2937','--text2':'#6B7280','--border':'#E5E7EB','--success':'#10B981','--danger':'#EF4444','--warning':'#F59E0B'}},
@@ -677,7 +688,9 @@ const THEMES = [
   {id:'amber-dark', name:'夜橙', dark:true, vars:{...DARK_BASE,'--primary':'#FBBF24','--primary-hover':'#F59E0B','--primary-soft':'#3A2E16','--primary-softer':'#2C2312'}},
   {id:'rose-dark', name:'夜粉', dark:true, vars:{...DARK_BASE,'--primary':'#F472B6','--primary-hover':'#EC4899','--primary-soft':'#3A1E32','--primary-softer':'#2C1826'}}
 ];
+// 主题选择在 localStorage 中的键名。
 const THEME_KEY = 'astral_theme';
+// 应用主题：写入 CSS 变量 → 持久化 → 刷新选择器高亮。
 function applyTheme(id) {
   const t = THEMES.find(x=>x.id===id) || THEMES[0];
   const root = document.documentElement;
@@ -685,6 +698,7 @@ function applyTheme(id) {
   localStorage.setItem(THEME_KEY, id);
   renderThemeOptions();
 }
+// 渲染浅/暗两组主题选择卡片，并对当前主题加 active 高亮。
 function renderThemeOptions() {
   const cur = localStorage.getItem(THEME_KEY) || 'violet';
   const light = document.getElementById('theme-light');
@@ -692,11 +706,13 @@ function renderThemeOptions() {
   light.innerHTML = THEMES.filter(t=>!t.dark).map(t=>themeOptHtml(t,cur)).join('');
   dark.innerHTML = THEMES.filter(t=>t.dark).map(t=>themeOptHtml(t,cur)).join('');
 }
+// 单个主题卡片 HTML：三色样块（主色/柔色/卡片色）+ 名称，点击即切换。
 function themeOptHtml(t, cur) {
   const cp = t.dark ? '#A78BFA' : '#8B5CF6';
   const sw = `<i style="background:${t.vars['--primary']}"></i><i style="background:${t.vars['--primary-soft']}"></i><i style="background:${t.vars['--bg-card']};border:1px solid ${t.vars['--border']}"></i>`;
   return `<div class="theme-opt ${t.id===cur?'active':''}" onclick="applyTheme('${t.id}')"><div class="theme-swatch">${sw}</div><div class="theme-name">${t.name}</div></div>`;
 }
+// 页面加载即执行：抢在首屏渲染前把已保存的主题变量写到 <html>，避免闪白。
 (function initTheme(){
   const saved = localStorage.getItem(THEME_KEY) || 'violet';
   const t = THEMES.find(x=>x.id===saved) || THEMES[0];
@@ -705,22 +721,27 @@ function themeOptHtml(t, cur) {
 })();
 
 /* ================= 图标选择 ================= */
+// 资料页可选的房间图标 emoji 列表（无自定义头像时展示给对端）。
 const ICONS = ['🎮','👾','🕹️','⛏️','🚗','🏭','🛶','⚔️','🐱','🐶','🐰','🦊','🐼','🐸','🦁','🐙','🧙','🎯','🎲','🧩','🌐','💻','🖥️','📡','⚙️','🚀'];
+// 服务端资料的本地缓存（与 /api/profile 字段对应）；avatar 为待展示的 base64。
 let profile = { nickname:'服务器', icon:'🎮', disable_p2p:false, enable_tun:true, static_ipv4:'', avatar:null, auto_join_enabled:false, auto_join_code:'', auto_create_enabled:false, auto_create_game_id:'', auto_create_game_name:'' };
+// 编辑弹窗里暂存的新头像（未点保存前不覆盖 profile）；avatarDirty 标记是否有改动。
 let pendingAvatar = null;
 let avatarDirty = false;
 
 /* ================= 状态 ================= */
-let currentPage = 'connect';
-let selectedGame = null;
-let games = [];
-let pollTimer = null;
-let editingServerId = null;
-let serverLatencies = {};
-let currentRoom = null;
-let shareUrl = '';
+// 以下为各页面共享的全局运行时状态。
+let currentPage = 'connect';   // 当前激活的页面名
+let selectedGame = null;       // 建房弹窗中选中的游戏 id
+let games = [];                // /api/games 返回的游戏目录
+let pollTimer = null;          // 成员列表轮询定时器（3 秒）
+let editingServerId = null;    // 服务器编辑弹窗当前编辑的 id（null=新增）
+let serverLatencies = {};      // 服务器 ping 结果 {id: 毫秒数|-1}
+let currentRoom = null;        // 当前房间会话（/api/status 同步）
+let shareUrl = '';             // 当前房间的分享链接
 
 /* ================= API ================= */
+// 统一 fetch 封装：自动带 Cookie、解析 JSON；401 弹登录框；非 2xx 抛错。
 async function api(path, opts={}) {
   const headers = {'Content-Type':'application/json'};
   const r = await fetch('/api'+path, {headers, credentials:'same-origin', ...opts});
@@ -734,6 +755,7 @@ async function api(path, opts={}) {
   try { return JSON.parse(text); } catch(e) { return { ok:true, raw:text }; }
 }
 
+// 顶部轻提示：动态插入 toast 元素，3 秒后自动移除。
 function toast(msg, type='success') {
   const t = document.createElement('div');
   t.className = `toast ${type}`;
@@ -741,7 +763,9 @@ function toast(msg, type='success') {
   document.body.appendChild(t);
   setTimeout(()=>t.remove(), 3000);
 }
+// HTML 转义：利用 textContent→innerHTML 注入安全，所有用户/对端字符串渲染前必经此函数。
 function esc(s){ const d=document.createElement('div'); d.textContent=s==null?'':String(s); return d.innerHTML; }
+// 模态框开关：靠 .open 类控制显隐（CSS 控制过渡）。
 function closeModal(id){ document.getElementById(id).classList.remove('open'); }
 function showModal(id){ document.getElementById(id).classList.add('open'); }
 
@@ -764,6 +788,7 @@ async function copyText(text) {
 }
 
 /* ================= 页面切换 ================= */
+// 侧边栏页面切换：切 .active 类，并按需懒加载目标页数据。
 function switchPage(name) {
   currentPage = name;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -782,6 +807,7 @@ async function loadAbout() {
 }
 
 /* ================= 资料 ================= */
+// 在指定容器渲染头像：有自定义头像(base64)时渲染图片，否则降级显示 emoji。
 function renderAvatar(el, base64, emoji) {
   if (base64) {
     el.innerHTML = '<img draggable="false" alt="">';
@@ -790,6 +816,7 @@ function renderAvatar(el, base64, emoji) {
     el.textContent = emoji || '🎮';
   }
 }
+// 拉取 /api/profile 并刷新本地 profile 缓存与全部相关 UI。
 async function loadProfile() {
   try {
     const d = await api('/profile');
@@ -797,6 +824,7 @@ async function loadProfile() {
     applyProfileUI();
   } catch(e) {}
 }
+// 把 profile 缓存灌到侧边栏/顶栏/设置页的所有控件（头像、昵称、开关、守护模式）。
 function applyProfileUI() {
   const name = profile.nickname || '服务器';
   renderAvatar(document.getElementById('side-avatar'), profile.avatar, profile.icon);
@@ -824,12 +852,14 @@ function applyProfileUI() {
   updateAutoCreateDesc();
   toggleDaemonEnabled();
 }
+// 刷新"自动创建"预设游戏的已选说明文字。
 function updateAutoCreateDesc() {
   const el = document.getElementById('auto-create-desc');
   el.textContent = profile.auto_create_game_id
     ? '已选择：' + (profile.auto_create_game_name || profile.auto_create_game_id)
     : '尚未选择，点击右侧按钮选择';
 }
+// 守护总开关联动：关闭时禁用模式 radio、输入框与保存按钮。
 function toggleDaemonEnabled() {
   const on = document.getElementById('auto-join-enabled').checked;
   const radios = document.getElementsByName('auto-mode');
@@ -839,11 +869,13 @@ function toggleDaemonEnabled() {
   saveBtns.forEach(b => { b.disabled = !on; b.style.opacity = on?'':'0.5'; b.style.pointerEvents = on?'':'none'; });
   if (codeInput) codeInput.disabled = !on;
 }
+// 切换自动加入/自动创建两个 radio 时，交换两块配置区的显隐。
 function toggleAutoMode() {
   const mode = document.querySelector('input[name="auto-mode"]:checked').value;
   document.getElementById('auto-join-config').style.display = mode==='create'?'none':'';
   document.getElementById('auto-create-config').style.display = mode==='create'?'':'none';
 }
+// 打开"选择预设游戏"弹窗（复用建房弹窗的预设模式）。
 function showAutoCreatePicker() {
   showCreateRoomModal(true);
 }
@@ -885,6 +917,7 @@ async function saveAutoJoin() {
     toast('守护进程设置已保存');
   } catch(e) { toast(e.message,'error'); }
 }
+// 打开资料编辑弹窗：用当前资料初始化暂存区与各控件。
 function openEditProfile() {
   pendingAvatar = profile.avatar;
   avatarDirty = false;
@@ -894,32 +927,38 @@ function openEditProfile() {
   renderEmojiGrid(profile.icon);
   showModal('modal-profile');
 }
+// 选择头像文件：校验 ≤512KB，读成 base64 放进暂存区（保存前不提交服务端）。
 function onAvatarFile(input) {
   const f = input.files && input.files[0];
   if (!f) return;
   if (f.size > 512*1024) { toast('头像图片不能超过 512KB','error'); input.value=''; return; }
   const reader = new FileReader();
   reader.onload = () => {
+    // DataURL 形如 data:image/png;base64,xxxx，只取逗号后的载荷部分。
     const base64 = String(reader.result).split(',')[1] || '';
     pendingAvatar = base64; avatarDirty = true;
     renderAvatar(document.getElementById('profile-avatar'), base64, profile.icon);
   };
   reader.readAsDataURL(f);
 }
+// 清除头像：暂存置空串（与 null 区分，表示"显式删除"），恢复 emoji 显示。
 function clearAvatar() {
   pendingAvatar = ''; avatarDirty = true;
   renderAvatar(document.getElementById('profile-avatar'), null, profile.icon);
   document.getElementById('avatar-file').value = '';
 }
+// 渲染 emoji 选择网格并高亮当前选中项。
 function renderEmojiGrid(active) {
   const el = document.getElementById('emoji-grid');
   el.innerHTML = ICONS.map(i=>`<div class="emoji-opt ${i===active?'active':''}" onclick="pickEmoji('${i}')">${i}</div>`).join('');
 }
+// 点选 emoji：立即更新预览（头像优先，无头像时才看得见）并写入 profile.icon。
 function pickEmoji(i) {
   renderAvatar(document.getElementById('profile-avatar'), pendingAvatar, i);
   document.getElementById('emoji-grid').querySelectorAll('.emoji-opt').forEach(e=>e.classList.toggle('active', e.textContent===i));
   profile.icon = i;
 }
+// 保存昵称/图标/头像：仅在头像有改动时才携带 avatar 字段（避免每次都传大图）。
 async function saveProfile() {
   const name = document.getElementById('profile-name').value.trim();
   if (!name) return toast('昵称不能为空','error');
@@ -932,6 +971,7 @@ async function saveProfile() {
     toast('资料已保存（重建房间后昵称生效）');
   } catch(e){ toast(e.message,'error'); }
 }
+// P2P 开关即时保存；失败时把开关拨回原状态。
 async function toggleP2p(checked) {
   try {
     const d = await api('/profile',{method:'PUT',body:JSON.stringify({disable_p2p:checked})});
@@ -939,6 +979,7 @@ async function toggleP2p(checked) {
     toast(checked ? '已启用仅中继（禁用 P2P）' : '已恢复 P2P 打洞');
   } catch(e){ document.getElementById('disable-p2p').checked = !checked; toast(e.message,'error'); }
 }
+// TUN 开关即时保存（新房间才生效，提示文案中说明）。
 async function toggleTun(checked) {
   try {
     const d = await api('/profile',{method:'PUT',body:JSON.stringify({enable_tun:checked})});
@@ -946,6 +987,7 @@ async function toggleTun(checked) {
     toast(checked ? '已启用 TUN 虚拟网卡（下次建房生效）' : '已禁用 TUN 虚拟网卡（下次建房生效）');
   } catch(e){ document.getElementById('enable-tun').checked = !checked; toast(e.message,'error'); }
 }
+// 保存静态虚拟 IP：前端先做 CIDR 粗校验（留空表示交给 DHCP）。
 async function saveStaticIp() {
   const ip = document.getElementById('static-ipv4').value.trim();
   if (ip && !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/.test(ip)) {
@@ -998,6 +1040,7 @@ function updateVersionLabels(d) {
   if (av) av.textContent = d.current_version || '—';
 }
 
+// 手动检查更新：弹窗内展示版本对比、发行说明与"立即更新"按钮（或失败原因）。
 async function doCheckUpdate() {
   const content = document.getElementById('update-content');
   content.innerHTML = '<div style="text-align:center;color:var(--text2);padding:20px 0;">正在检查更新…</div>';
@@ -1044,6 +1087,7 @@ async function doCheckUpdate() {
     content.innerHTML = `<div style="padding:12px 0;"><div style="color:var(--danger);margin-bottom:8px;">检查失败</div><div style="color:var(--text2);font-size:13px;">${esc(e.message)}</div></div>`;
   }
 }
+// 触发在线更新：二次确认 → POST 下载替换 → 服务重启后 10 秒自动刷新页面。
 async function doApplyUpdate() {
   if (!lastUpdateInfo || !lastUpdateInfo.download_url) {
     toast('未找到匹配的下载资源','error'); return;
@@ -1067,10 +1111,12 @@ async function doApplyUpdate() {
 }
 
 /* ================= 联机 ================= */
+// 游戏 id → 兜底 emoji（远程图标加载失败或无图标时使用）。
 function gameEmoji(id){
   const m = {minecraft:'⛏️',grand_theft_auto_v:'🚗',mindustry:'🏭',raft:'🛶',forged_alliance:'⚔️',valheim:'❄️',ark:'🦖',dont_starve_together:'🍖',factorio:'🏭',left_4_dead_2:'🧟',palworld:'🐺',project_zomboid:'🧟',rust:'🏔️',satisfactory:'🏭',seven_days_to_die:'🧟',stardew_valley:'🌾',terraria:'⛏️',v_rising:'🧛',custom:'🔧'};
   return m[id]||'🎮';
 }
+// 游戏图标 HTML：有远程 icon URL 时渲染 <img>（失败回退 emoji），否则直接显示 emoji。
 function gameIconInner(g) {
   const emoji = gameEmoji(g && g.id);
   if (g && g.icon) {
@@ -1078,16 +1124,20 @@ function gameIconInner(g) {
   }
   return emoji;
 }
+// 图标加载失败的兜底：把 <img> 替换为等大 emoji span。
 function imgFail(el, emoji) {
   const span = document.createElement('span');
   span.style.fontSize = '19px';
   span.textContent = emoji;
   el.replaceWith(span);
 }
+// 入口按钮：立即建房模式。
 async function showCreateRoom() {
   showCreateRoomModal(false);
 }
+// 建房/选预设共用的游戏选择弹窗，isPreset 决定标题、按钮文案与点击后的行为。
 function showCreateRoomModal(isPreset) {
+  // 挂在 window 上的临时模式标记：'now'=立即建房，'preset'=仅记为守护预设。
   window.__createMode = isPreset ? 'preset' : 'now';
   document.getElementById('create-room-title').innerHTML =
     (isPreset ? '选择预设游戏' : '创建房间') + ' <button class="modal-close" onclick="closeModal(\'modal-create-room\')">✕</button>';
@@ -1097,18 +1147,23 @@ function showCreateRoomModal(isPreset) {
     selectedGame = profile.auto_create_game_id;
   }
   showModal('modal-create-room');
+  // 游戏目录首次打开时懒加载并缓存到 games。
   if (!games.length) {
     api('/games').then(d => { games = d.games || []; renderGames(); }).catch(e => toast(e.message,'error'));
     return;
   }
   renderGames();
 }
+// 渲染游戏列表项（图标/名称/描述/选中勾）。
 function renderGames() {
   const el = document.getElementById('game-list');
   el.innerHTML = games.map(g=>`<div class="game-item ${selectedGame===g.id?'selected':''}" onclick="selectGame('${g.id}')"><div class="game-icon">${gameIconInner(g)}</div><div class="game-info"><div class="game-name">${esc(g.name)}</div><div class="game-desc">${esc(g.description||'')}</div></div>${selectedGame===g.id?'<div class="check">✓</div>':''}</div>`).join('');
 }
+// 选中游戏并重渲染高亮。
 function selectGame(id){ selectedGame=id; renderGames(); }
+// 搜索框即时过滤：按游戏名包含匹配（不区分大小写）。
 function filterGames(){ const q=document.getElementById('game-search').value.toLowerCase(); document.querySelectorAll('.game-item').forEach(el=>{ el.style.display = el.querySelector('.game-name').textContent.toLowerCase().includes(q)?'':'none'; }); }
+// 弹窗主按钮：preset 模式只记预设；now 模式调接口建房并切到房间视图。
 async function doCreateRoom() {
   if(!selectedGame) return toast('请选择游戏','error');
   const g = games.find(x=>x.id===selectedGame);
@@ -1127,7 +1182,9 @@ async function doCreateRoom() {
     else toast(d.error||'创建失败','error');
   }catch(e){ toast(e.message,'error'); }
 }
+// 打开加入房间弹窗并清空输入框（可粘贴短码/链接/离线串）。
 function showJoinRoom(){ document.getElementById('join-input').value=''; showModal('modal-join-room'); }
+// 提交加入：服务端自动识别三种邀请格式。
 async function doJoinRoom() {
   const input = document.getElementById('join-input').value.trim();
   if(!input) return toast('请输入邀请链接或短码','error');
@@ -1137,10 +1194,13 @@ async function doJoinRoom() {
     else toast(d.error||'加入失败','error');
   }catch(e){ toast(e.message,'error'); }
 }
+// 离开房间：停实例 + 清本地状态 + 停轮询 + 回首页视图。
 async function leaveRoom(){
   try{ await api('/room/leave',{method:'POST'}); currentRoom=null; shareUrl=''; toast('已离开房间'); showHomeUI(); stopPolling(); }catch(e){ toast(e.message,'error'); }
 }
+// 首页（未连房间）/房间中两个区块的显隐切换。
 function showHomeUI(){ document.getElementById('connect-home').style.display=''; document.getElementById('connect-room').style.display='none'; }
+// 切到房间视图并填充游戏名/图标/房间码；无短码时降级显示离线串前 20 字符。
 function showRoomUI(){
   document.getElementById('connect-home').style.display='none';
   document.getElementById('connect-room').style.display='';
@@ -1151,12 +1211,15 @@ function showRoomUI(){
   let code = currentRoom.short_code || '------';
   if(!currentRoom.short_code && currentRoom.offline_invite) code = currentRoom.offline_invite.slice(0,20)+'…';
   document.getElementById('room-code').textContent = code;
+  // 复制按钮实际使用的值：短码优先，否则完整离线串。
   window._roomCode = currentRoom.short_code || currentRoom.offline_invite || '';
 }
+// 复制邀请链接：本地缺失时先向 /room/current 补取一次。
 async function shareRoom() {
   if (!shareUrl) { try { const d = await api('/room/current'); shareUrl = d.share_url||''; } catch(e){} }
   if (await copyText(shareUrl)) toast('邀请链接已复制');
 }
+// 复制房间码；复制 API 失败且内容存在时退化为浏览器 prompt 供用户手动复制。
 async function copyRoomCode() {
   const c = window._roomCode;
   if (await copyText(c)) toast('房间码已复制');
@@ -1164,8 +1227,10 @@ async function copyRoomCode() {
 }
 
 /* ================= 成员轮询 ================= */
+// 启动 3 秒定时轮询并立即执行一次；start 前先 stop 防止多实例重复计时。
 function startPolling(){ stopPolling(); pollTimer = setInterval(pollStatus, 3000); pollStatus(); }
 function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
+// 连接类型英→中展示文案。
 function connLabel(c){
   if(!c) return '未知';
   const t = String(c);
@@ -1178,6 +1243,7 @@ function filterPublicNodes(nodes) {
   // 对齐原版：hostname 以 PublicServer 开头的是中继/目录节点，不进成员列表
   return (nodes||[]).filter(n => !(n.hostname||'').startsWith('PublicServer'));
 }
+// 轮询主体：刷新本机状态卡、房间成员列表、设置页版本信息；错误静默（下次重试）。
 async function pollStatus(){
   try {
     const d = await api('/status');
@@ -1202,6 +1268,8 @@ async function pollStatus(){
     }
   }catch(e){}
 }
+// 渲染成员卡片列表：本机(peer_id=0)用自己的头像/昵称，远端用 hostname 首字占位；
+// 每张卡片带连接方式/NAT/版本标签与延迟。
 function renderMembers(nodes){
   const el = document.getElementById('member-list');
   document.getElementById('room-member-count').textContent = nodes.length ? `共 ${nodes.length} 人` : '';
@@ -1222,6 +1290,7 @@ function renderMembers(nodes){
       n.nat?`<span class="tag">${esc(n.nat)}</span>`:'',
       n.version?`<span class="tag">${esc(n.version)}</span>`:''
     ].join('');
+    // 延迟负值视为无效；IPv4 去掉 CIDR 后缀只展示地址。
     const lat = n.latency_ms<0 ? '--' : Math.round(n.latency_ms)+'ms';
     const ip = (n.ipv4||'').split('/')[0];
     return `<div class="member-item">
@@ -1237,7 +1306,9 @@ function renderMembers(nodes){
 }
 
 /* ================= 服务器 ================= */
+// 拉取服务器列表并渲染。
 async function loadServers(){ try{ const d = await api('/servers'); renderServers(d.servers||[]); }catch(e){ toast(e.message,'error'); } }
+// 渲染服务器行：延迟徽标（<150ms 绿、其他黄、-1/超时红）、名称、URI、启用开关与操作按钮。
 function renderServers(list){
   const el = document.getElementById('server-list');
   if(!list.length){ el.innerHTML = '<div style="color:var(--text2);font-size:13px;padding:10px;">暂无服务器，点击右上角添加</div>'; return; }
@@ -1256,12 +1327,16 @@ function renderServers(list){
     </div>`;
   }).join('');
 }
+// 一键测速：服务端并发 TCP ping，结果写回 serverLatencies 后重绘列表。
 async function pingAllServers(){
   toast('正在测速…');
   try{ const d = await api('/servers/ping'); serverLatencies = {}; (d.results||[]).forEach(r=>serverLatencies[r.id]=r.latency_ms); loadServers(); toast('测速完成'); }catch(e){ toast(e.message,'error'); }
 }
+// 启用开关即时保存；失败时由 loadServers() 把开关还原为服务端状态。
 async function toggleServer(id,enabled){ try{ await api(`/servers/${id}`,{method:'PUT',body:JSON.stringify({enabled})}); }catch(e){ toast(e.message,'error'); loadServers(); } }
+// 删除前 confirm 二次确认。
 async function deleteServer(id){ if(!confirm('确定删除该服务器？'))return; try{ await api(`/servers/${id}`,{method:'DELETE'}); toast('已删除'); loadServers(); }catch(e){ toast(e.message,'error'); } }
+// 打开新增服务器弹窗（editingServerId=null 区分新增/编辑）。
 function showAddServer(){
   editingServerId=null;
   document.getElementById('server-modal-title').innerHTML='添加服务器 <button class="modal-close" onclick="closeModal(\'modal-server\')">✕</button>';
@@ -1270,6 +1345,7 @@ function showAddServer(){
   document.getElementById('server-modal-save').textContent='添加';
   showModal('modal-server');
 }
+// 打开编辑弹窗：先拉最新列表定位该服务器数据回填表单。
 function showEditServer(id){
   api('/servers').then(d=>{
     const s=(d.servers||[]).find(x=>x.id===id);
@@ -1282,6 +1358,7 @@ function showEditServer(id){
     showModal('modal-server');
   });
 }
+// 保存服务器表单：editingServerId 有值走 PUT 修改，否则 POST 新增。
 async function doSaveServer(){
   const name=document.getElementById('server-name').value.trim();
   const uri=document.getElementById('server-uri').value.trim();
@@ -1295,29 +1372,36 @@ async function doSaveServer(){
 
 /* ================= 设置 ================= */
 /* ================= WebSocket 事件推送 ================= */
+// eventWs：当前面板推送连接；wsEnabled：是否期望保持连接（退出登录置 false）。
 let eventWs = null;
 let wsEnabled = false;
 
+// 面板推送地址：随页面协议自动选 ws/wss，路径固定 /api/ws（Cookie 鉴权）。
 function wsEndpoint() {
   const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
   return proto + location.host + '/api/ws';
 }
+// 把推送地址渲染到设置页文本框。
 function renderWsEndpoint() {
   const el = document.getElementById('ws-endpoint');
   if (el) el.textContent = wsEndpoint();
 }
+// 连接状态指示灯文案与颜色。
 function setWsStatus(connected) {
   const el = document.getElementById('ws-status');
   if (!el) return;
   if (connected) { el.textContent = '已连接'; el.style.color = 'var(--success)'; }
   else { el.textContent = '未连接'; el.style.color = 'var(--danger)'; }
 }
+// 复制推送地址。
 async function copyWsEndpoint() {
   if (await copyText(wsEndpoint())) toast('推送地址已复制');
 }
+// 建立推送连接：带断线自动重连（见 onclose → scheduleReconnect）。
 function connectEventWs() {
   wsEnabled = true;
   renderWsEndpoint();
+  // 重连前先关旧连接，避免重复事件。
   if (eventWs) { try { eventWs.close(); } catch(e){} }
   let ws;
   try { ws = new WebSocket(wsEndpoint()); }
@@ -1330,17 +1414,20 @@ function connectEventWs() {
     eventWs = null;
     scheduleReconnect();
   };
+  // 所有消息均为 JSON 事件，解析失败直接忽略。
   ws.onmessage = (ev) => {
     let msg;
     try { msg = JSON.parse(ev.data); } catch(e) { return; }
     handleRoomEvent(msg);
   };
 }
+// 5 秒后重连；wsEnabled=false（已登出）时放弃。
 function scheduleReconnect() {
   // 已退出登录则停止重连
   if (!wsEnabled) return;
   setTimeout(() => { if (wsEnabled) connectEventWs(); }, 5000);
 }
+// 主动断开（退出登录时调用）。
 function disconnectEventWs() {
   wsEnabled = false;
   if (eventWs) { try { eventWs.close(); } catch(e){} eventWs = null; }
@@ -1365,6 +1452,7 @@ function handleRoomEvent(msg) {
 }
 
 /* ================= SMTP 邮件通知 ================= */
+// 加载 SMTP 状态：面板只管收件人；主机/授权码等在 config.toml 编辑（密码不回传）。
 async function loadSmtp() {
   try {
     const d = await api('/smtp');
@@ -1381,6 +1469,7 @@ async function loadSmtp() {
     }
   } catch(e) {}
 }
+// 保存收件人：文本框按换行拆分为数组，服务端做格式校验与去重。
 async function saveRecipients() {
   const list = document.getElementById('smtp-recipients').value
     .split('\n').map(s => s.trim()).filter(Boolean);
@@ -1392,6 +1481,7 @@ async function saveRecipients() {
     toast('收件人已保存（共 ' + (d.recipients || []).length + ' 个）');
   } catch(e) { toast(e.message, 'error'); }
 }
+// 发送测试邮件验证 SMTP 配置是否可用。
 async function sendTestEmail() {
   toast('正在发送测试邮件…');
   try {
@@ -1399,6 +1489,7 @@ async function sendTestEmail() {
     toast('测试邮件已发送，请查收');
   } catch(e) { toast(e.message, 'error'); }
 }
+// 立即把当前房间详情发给全部收件人。
 async function sendNowEmail() {
   toast('正在发送房间详情邮件…');
   try {
@@ -1408,6 +1499,7 @@ async function sendNowEmail() {
 }
 
 /* ================= 第三方服务（WebSocket 密钥） ================= */
+// 加载密钥与在线服务列表，并拼出示例连接 URL 供第三方接入参考。
 async function loadWsServices() {
   try {
     const d = await api('/ws/key');
@@ -1438,10 +1530,12 @@ async function loadWsServices() {
     }
   } catch(e) {}
 }
+// 复制第三方连接密钥。
 async function copyWsKey() {
   const el = document.getElementById('ws-key-desc');
   if (await copyText(el.textContent)) toast('连接密钥已复制');
 }
+// 轮换密钥：确认后调接口，旧连接全部被踢（4001），随后刷新列表。
 async function rotateWsKey() {
   if (!confirm('刷新后旧密钥立即失效，所有已连接的第三方服务将被断开。确定刷新？')) return;
   try {
@@ -1453,6 +1547,7 @@ async function rotateWsKey() {
 }
 
 
+// 设置页数据总加载（切到设置页时调用）。
 async function loadSettings(){
   await loadProfile();
   pollStatus();
@@ -1462,21 +1557,26 @@ async function loadSettings(){
   renderWsEndpoint();
   if (!eventWs && wsEnabled) connectEventWs();
 }
+// 读取 config.toml 原文到高级编辑器。
 async function loadConfig(){ try{ const d=await api('/config'); document.getElementById('config-editor').value=d.config; }catch(e){ toast(e.message,'error'); } }
+// 保存 config.toml（restart:true 服务端写盘后重启实例）。
 async function saveConfig(){
   const config=document.getElementById('config-editor').value;
   try{ await api('/config',{method:'PUT',body:JSON.stringify({config,restart:true})}); toast('已保存并重启'); loadSettings(); }catch(e){ toast(e.message,'error'); }
 }
+// 凭据列表加载与渲染。
 async function loadCredentials(){ try{ const d=await api('/credentials'); renderCredentials(d.credentials||[]); }catch(e){} }
 function renderCredentials(list){
   const el=document.getElementById('credential-list');
   if(!list.length){ el.innerHTML='<div style="color:var(--text2);font-size:13px;">暂无凭据</div>'; return; }
   el.innerHTML=list.map(c=>`<div class="settings-row"><div><div class="settings-label">${esc(c.credential_id||'')}</div><div class="settings-desc">过期: ${c.expiry_unix?new Date(c.expiry_unix*1000).toLocaleString():'-'} · ${c.reusable?'可复用':'单次'}</div></div><button class="btn btn-danger btn-sm" onclick="revokeCredential('${esc(c.credential_id)}')">撤销</button></div>`).join('');
 }
+// 生成一张 30 天有效、可复用的进网凭据。
 async function createCredential(){ try{ await api('/credentials',{method:'POST',body:JSON.stringify({ttl_seconds:86400*30,reusable:true})}); toast('凭据已生成'); loadCredentials(); }catch(e){ toast(e.message,'error'); } }
 async function revokeCredential(id){ if(!confirm('确定撤销该凭据？'))return; try{ await api(`/credentials/${id}`,{method:'DELETE'}); toast('已撤销'); loadCredentials(); }catch(e){ toast(e.message,'error'); } }
 
 /* ================= 日志 ================= */
+// 拉取最近 100 条内核/服务日志并按等级着色，滚动到最底。
 async function loadLogs(panelId){
   const pid = panelId||'log-panel';
   try {
@@ -1490,11 +1590,14 @@ async function loadLogs(panelId){
   }catch(e){}
 }
 
+// 手动刷新按钮：资料 + 状态 +（在房间时）日志。
 function refreshAll(){ loadProfile(); pollStatus(); if(currentRoom) loadLogs(); }
 
 /* ================= 初始化 ================= */
+// 登录成功后执行：校验会话 → 连 WS → 拉游戏/资料/状态 → 每日更新检查 → 恢复房间视图。
 async function initApp(){
   renderThemeOptions();
+  // 先探活会话：401 时停留登录浮层，不继续加载。
   try { await api('/status'); } catch(e) { return; }
   hideLoginView();
   // 建立 WebSocket 事件推送（房间码变动实时同步）
@@ -1508,6 +1611,7 @@ async function initApp(){
   pollStatus();
   // 当日首次访问自动检查更新（后台执行，不阻塞页面）
   autoDailyUpdateCheck();
+  // 重启后/刷新后恢复房间：服务端内存里仍有房间则直接回到房间视图并轮询。
   try {
     const d = await api('/room/current');
     if(d.room){ currentRoom = d.room; shareUrl = d.share_url||''; showRoomUI(); startPolling(); }

@@ -1,10 +1,16 @@
-//! 短码与离线邀请串的生成/解析。
+//! ==== 邀请编码模块 ====
+//! 负责两种邀请载体的生成与解析：
+//! - 离线串：`AG1.` 前缀 + Base64urlNoPad(JSON)，完全自包含、不依赖任何服务；
+//! - 短码：由外部短码服务托管（见 api::try_create_short_code / fetch_short_code），
+//!   本模块只负责短码字符规范化与分享链接拼装。
+//! 另提供建房时随机 network_name / network_secret 的生成函数。
 
 use anyhow::{Context, Result};
 use base64::Engine;
 
 use crate::models::RoomInvitePayload;
 
+/// 离线邀请串固定前缀（AG = AstralGame，1 = 载荷格式版本）。
 const OFFLINE_INVITE_PREFIX: &str = "AG1.";
 
 /// 生成离线邀请串：AG1. + Base64urlNoPad(UTF8(JSON(payload)))
@@ -35,6 +41,7 @@ pub fn decode_offline_invite(raw: &str) -> Result<RoomInvitePayload> {
 pub fn generate_network_name() -> String {
     use rand::Rng;
     let mut rng = rand::thread_rng();
+    // 字符集 a-z + 0-9，共 36 个，等概率抽取。
     let suffix: String = (0..10)
         .map(|_| {
             let idx = rng.gen_range(0..36);
@@ -50,6 +57,7 @@ pub fn generate_network_name() -> String {
 /// 生成随机 network_secret（16位，排除易混淆字符）。
 pub fn generate_network_secret() -> String {
     use rand::Rng;
+    // 剔除 0/1/I/L/O/o/l/i 等易混淆字符，方便用户手抄。
     const ALPHABET: &[u8] =
         b"23456789ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz";
     let mut rng = rand::thread_rng();
@@ -59,6 +67,7 @@ pub fn generate_network_secret() -> String {
 }
 
 /// 规范化短码：去空白/连字符、大写，I/L→1，O→0。
+/// 对齐 Crockford Base32 的去歧义规则，允许用户输入时带分隔符或看错字形。
 pub fn normalize_share_code(raw: &str) -> String {
     raw.trim()
         .chars()
@@ -72,6 +81,8 @@ pub fn normalize_share_code(raw: &str) -> String {
 }
 
 /// 构建分享链接。
+/// 优先使用短码（短链接更易传播）；无短码时回退为 AG1. 离线串；
+/// 两者都没有（理论上不会出现）返回空串。
 pub fn build_join_url(short_code: Option<&str>, offline_invite: Option<&str>) -> String {
     let token = short_code
         .map(|s| s.to_string())

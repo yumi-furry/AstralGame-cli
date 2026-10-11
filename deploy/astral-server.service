@@ -1,19 +1,31 @@
+# systemd 单元：Astral Server 无头组网服务
+# 安装位置：/etc/systemd/system/astral-server.service
+# 启用：systemctl daemon-reload && systemctl enable --now astral-server
+
 [Unit]
 Description=Astral Game P2P Server (headless CLI + web management)
 Documentation=https://github.com/EasyTier/EasyTier
+# 等网络就绪后再启动，避免出站拨号/监听绑定失败。
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 # 所有文件都放在 /opt/astral-server/ 目录下
+# （config.toml / servers.json / avatar.bin / Email/ 均相对工作目录读写）。
 WorkingDirectory=/opt/astral-server
 ExecStart=/opt/astral-server/astral-server run
+# 进程异常退出（非 systemctl stop）时 5 秒后自动拉起。
 Restart=on-failure
 RestartSec=5
+# 停止宽限期：留给 EasyTier 内核优雅释放 TUN 与连接。
 TimeoutStopSec=15
+# 单机可能承载大量 P2P 连接，放开文件描述符上限。
 LimitNOFILE=1048576
 # TUN / 原始套接字 / 绑定低端口所需能力
+# CAP_NET_ADMIN：创建/配置 TUN 网卡与路由；
+# CAP_NET_RAW：原始套接字（ICMP/打洞探测）；
+# CAP_NET_BIND_SERVICE：允许绑定 1024 以下端口。
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
 

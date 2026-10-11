@@ -20,10 +20,12 @@ pub async fn handle_call(
     profile: &Arc<RwLock<ServerConfig>>,
 ) {
     if channel != "user.getInfo" {
+        // JSON-RPC 标准错误码 -32601：方法不存在。
         service.reply_call(token, -32601, "Method not found".to_string(), Vec::new());
         return;
     }
 
+    // 空 payload 视为无参数（{} 等价）；非空但非法 JSON 回 -32700 解析错误。
     let params: serde_json::Value = if payload.is_empty() {
         serde_json::Value::Null
     } else {
@@ -64,6 +66,7 @@ pub async fn handle_call(
         None => (None, String::new()),
     };
 
+    // 环境字段按客户端协议固定回显（无头服务器不采集真实防火墙/ISP）。
     let resp = serde_json::json!({
         "name": name,
         "avatarHash": if avatar_hash.is_empty() {
@@ -83,10 +86,12 @@ pub async fn handle_call(
         "isp": "",
     });
 
+    // 错误码 0 + 空 message 表示成功；payload 为响应 JSON 字节。
     let resp_payload = serde_json::to_vec(&resp).unwrap_or_default();
     service.reply_call(token, 0, String::new(), resp_payload);
 }
 
+/// 把字节片编码为小写十六进制字符串（用于 sha256 指纹）。
 fn hex_string(bytes: &[u8]) -> String {
     use std::fmt::Write;
     let mut s = String::with_capacity(bytes.len() * 2);

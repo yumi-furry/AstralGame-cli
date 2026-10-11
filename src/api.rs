@@ -1,4 +1,19 @@
-//! REST API 处理器：房间、服务器、节点状态。
+//! =============================================================================
+//! REST API 处理器集合（全部挂在 /api 下）。
+//!
+//! 分区：
+//! * 登录/登出（Cookie 会话，路由层免鉴权）
+//! * 节点状态 / 日志 / 资料 / 原始配置 / 启停
+//! * 进网凭据（生成 / 列表 / 撤销）
+//! * 房间（创建 / 加入 / 离开 / 当前房间，含邀请解析与短码服务交互）
+//! * 中继服务器列表（CRUD + TCP 测速）与内置游戏列表
+//! * SMTP 邮件通知（查询 / 收件人维护 / 测试 / 一键发信）
+//! * 第三方服务 ws_key（查看 / 轮换）
+//! * 在线更新（检查 GitHub Release / 下载应用）
+//!
+//! 房间的两个核心函数 `create_room_impl` / `join_from_input` 同时供 HTTP
+//! 与 main.rs 的守护进程自动联网逻辑复用，避免行为分叉。
+//! =============================================================================
 
 use axum::{
     extract::{Path, Query, State},
@@ -14,19 +29,26 @@ use crate::invite;
 use crate::models::{PeerEndpoint, RoomInvitePayload, ServerEntry};
 use crate::store;
 
+/// 统一错误响应：`{"error": "..."}` + 指定 HTTP 状态码。
 fn err(status: StatusCode, msg: impl Into<String>) -> Response {
     (status, Json(json!({ "error": msg.into() }))).into_response()
 }
 
 // ---------- 登录 / 登出（Cookie 会话） ----------
 
+/// 登录请求体。
 #[derive(Deserialize)]
 pub struct LoginRequest {
+    /// 配置中的用户名。
     username: String,
+    /// 配置中的密码（明文走内网/HTTPS，不落盘到前端）。
     password: String,
 }
 
+/// POST /api/auth/login：校验账密，通过后生成随机会话 token 并经 HttpOnly Cookie 下发。
+/// 硬约束：不使用 localStorage 存凭据；Cookie 带 HttpOnly + SameSite=Lax。
 pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>) -> Response {
+    // 读锁内完成比较后立即释放，避免跨 await。
     let ok = {
         let cfg = state.server_config.read().unwrap();
         !cfg.username.is_empty() && body.username == cfg.username && body.password == cfg.password
@@ -34,6 +56,7 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
     if !ok {
         return err(StatusCode::UNAUTHORIZED, "用户名或密码错误");
     }
+    // 会话 token 仅存内存：服务重启后所有面板需重新登录。
     let token = uuid::Uuid::new_v4().to_string();
     state.sessions.write().unwrap().insert(token.clone());
     (
@@ -46,6 +69,7 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
         .into_response()
 }
 
+/// POST /api/auth/logout：删除内存会话，并用 Max-Age=0 让浏览器立即过期 Cookie。
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Some(token) = crate::http::session_token(&headers) {
         state.sessions.write().unwrap().remove(&token);
@@ -62,15 +86,18 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
 
 // ---------- 节点状态 / 日志 ----------
 
+/// GET /api/status：返回节点状态快照（前端 3 秒轮询一次）。
 pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.node.snapshot())
 }
 
+/// /api/logs 的查询参数：tail=返回最近多少条。
 #[derive(Deserialize)]
 pub struct LogsQuery {
     tail: Option<usize>,
 }
 
+/// GET /api/logs?tail=N：读取节点环形日志，默认 200 条、上限 800 条。
 pub async fn logs(
     State(state): State<AppState>,
     Query(q): Query<LogsQuery>,
@@ -79,6 +106,7 @@ pub async fn logs(
     Json(json!({ "logs": state.node.logs(tail) }))
 }
 
+/// GET /api/config：返回 config.toml 原文及路径（供面板"配置文件"编辑器）。
 pub async fn get_config(State(state): State<AppState>) -> Response {
     match std::fs::read_to_string(&state.config_path) {
         Ok(raw) => Json(json!({ "config": raw, "path": state.config_path.to_string_lossy() }))
@@ -87,10 +115,14 @@ pub async fn get_config(State(state): State<AppState>) -> Response {
     }
 }
 
+/// PUT /api/profile 请求体：所有字段可选，仅更新出现的字段（PATCH 语义）。
 #[derive(Deserialize)]
 pub struct PutProfileRequest {
+    /// 房间昵称（写入 hostname）。
     nickname: Option<String>,
+    /// 房间 emoji 图标。
     icon: Option<String>,
+    /// 是否禁用 P2P 打洞（仅中继）。
     disable_p2p: Option<bool>,
     /// 是否创建 TUN 虚拟网卡
     enable_tun: Option<bool>,
@@ -110,8 +142,10 @@ pub struct PutProfileRequest {
     auto_create_game_name: Option<String>,
 }
 
+/// GET /api/profile：返回面板"资料/网络/守护进程"相关设置；头像读 avatar.bin 并 base64 内联。
 pub async fn get_profile(State(state): State<AppState>) -> impl IntoResponse {
     let cfg = state.server_config.read().unwrap();
+    // 头像以 data URI 所需的纯 base64 返回（前端自行拼前缀）；无头像时字段为 null。
     let avatar = crate::store::load_avatar().map(|bytes| {
         use base64::Engine;
         base64::engine::general_purpose::STANDARD.encode(bytes)
@@ -131,10 +165,13 @@ pub async fn get_profile(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
+/// PUT /api/profile：更新资料/网络/守护进程设置并写回 config.toml。
+/// 头像单独存 avatar.bin；自动加入与自动创建强制互斥；更新后返回最新完整资料。
 pub async fn put_profile(
     State(state): State<AppState>,
     Json(req): Json<PutProfileRequest>,
 ) -> Response {
+    // 第一段：更新内存中的 ServerConfig 并做合法性校验（整个块持有写锁）。
     {
         let mut cfg = state.server_config.write().unwrap();
         if let Some(n) = req.nickname {
@@ -195,6 +232,8 @@ pub async fn put_profile(
         }
     }
 
+    // 第二段：头像独立于 TOML，以原始字节存 avatar.bin。
+    // None=不变；空串=清除；非空 base64=解码并限 512KB 后覆盖写入。
     if let Some(avatar_b64) = req.avatar {
         let b64 = avatar_b64.trim().to_string();
         if b64.is_empty() {
@@ -216,6 +255,7 @@ pub async fn put_profile(
         }
     }
 
+    // 第三段：把更新后的 [astral_server] 持久化到 config.toml（EasyTier 部分原样保留）。
     let cfg = state.server_config.read().unwrap();
     if let Err(e) = crate::config::save(&state.config_path, &cfg) {
         return err(StatusCode::INTERNAL_SERVER_ERROR, format!("保存配置失败: {e}"));
@@ -236,12 +276,15 @@ pub async fn put_profile(
     .into_response()
 }
 
+/// POST /api/start 请求体：可直接带完整 TOML 文本；不带则读 config.toml。
 #[derive(Deserialize)]
 pub struct StartRequest {
     config: Option<String>,
 }
 
+/// POST /api/start：用请求体配置或磁盘配置启动（重启）EasyTier 实例。
 pub async fn start(State(state): State<AppState>, Json(req): Json<StartRequest>) -> Response {
+    // 无论配置来自请求体还是文件，都先经 parse 剥离 [astral_server]，只把内核配置交给节点。
     let toml = match req.config {
         Some(cfg) => match crate::config::parse(&cfg) {
             Ok(p) => p.instance_toml,
@@ -264,11 +307,13 @@ pub async fn start(State(state): State<AppState>, Json(req): Json<StartRequest>)
     }
 }
 
+/// POST /api/stop：停止当前实例（不断开 HTTP 服务本身）。
 pub async fn stop(State(state): State<AppState>) -> impl IntoResponse {
     state.node.stop().await;
     Json(json!({ "ok": true }))
 }
 
+/// POST /api/restart：用最近一次配置重启实例。
 pub async fn restart(State(state): State<AppState>) -> Response {
     match state.node.restart().await {
         Ok(id) => Json(json!({ "ok": true, "instance_id": id })).into_response(),
@@ -278,16 +323,19 @@ pub async fn restart(State(state): State<AppState>) -> Response {
     }
 }
 
+/// PUT /api/config 请求体：config 为完整 TOML 原文；restart=true 时保存后立即重启实例。
 #[derive(Deserialize)]
 pub struct PutConfigRequest {
     config: String,
     restart: Option<bool>,
 }
 
+/// PUT /api/config：面板"配置文件"编辑器保存接口（整文件覆盖写）。
 pub async fn put_config(
     State(state): State<AppState>,
     Json(req): Json<PutConfigRequest>,
 ) -> Response {
+    // 先解析校验，避免把坏配置写进文件。
     let parsed = match crate::config::parse(&req.config) {
         Ok(p) => p,
         Err(e) => return err(StatusCode::BAD_REQUEST, format!("配置无效: {e}")),
@@ -297,6 +345,7 @@ pub async fn put_config(
         return err(StatusCode::INTERNAL_SERVER_ERROR, format!("写入配置失败: {e}"));
     }
 
+    // 要求重启时用剥离后的内核配置重启；否则只落盘不影响运行中的实例。
     if req.restart.unwrap_or(false) {
         match state.node.start(parsed.instance_toml).await {
             Ok(id) => Json(json!({ "ok": true, "restarted": true, "instance_id": id }))
@@ -312,6 +361,7 @@ pub async fn put_config(
 
 // ---------- 凭据 ----------
 
+/// POST /api/credentials 请求体：有效期秒数 + 是否可复用（缺省可复用）。
 #[derive(Deserialize)]
 pub struct CreateCredentialRequest {
     ttl_seconds: i64,
@@ -319,10 +369,12 @@ pub struct CreateCredentialRequest {
     reusable: bool,
 }
 
+/// serde 缺省值：reusable 字段缺省时按可复用凭据生成。
 fn default_reusable() -> bool {
     true
 }
 
+/// POST /api/credentials：生成一张进网凭据。
 pub async fn create_credential(
     State(state): State<AppState>,
     Json(req): Json<CreateCredentialRequest>,
@@ -333,6 +385,7 @@ pub async fn create_credential(
     }
 }
 
+/// GET /api/credentials：列出全部凭据。
 pub async fn list_credentials(State(state): State<AppState>) -> Response {
     match state.node.list_credentials().await {
         Ok(c) => Json(json!({ "credentials": c })).into_response(),
@@ -340,6 +393,7 @@ pub async fn list_credentials(State(state): State<AppState>) -> Response {
     }
 }
 
+/// DELETE /api/credentials/:id：撤销指定凭据。
 pub async fn revoke_credential(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -352,14 +406,19 @@ pub async fn revoke_credential(
 
 // ---------- 房间 ----------
 
+/// POST /api/room/create 请求体。
 #[derive(Deserialize)]
 pub struct CreateRoomRequest {
+    /// 游戏 ID（取自 /api/games）。
     game_id: String,
+    /// 游戏名称。
     game_name: String,
+    /// 可选的自定义展示名。
     #[serde(default)]
     display_name: Option<String>,
 }
 
+/// POST /api/room/create：REST 包装；成功后异步广播 room.created 事件（WS + 邮件）。
 pub async fn create_room(
     State(state): State<AppState>,
     Json(req): Json<CreateRoomRequest>,
@@ -384,12 +443,22 @@ pub async fn create_room(
 }
 
 /// 创建房间核心实现：供 REST 处理器与守护进程自动创建复用。
+///
+/// 流程：
+/// 1. 读取已启用的中继服务器（没有则报错，房间必须至少有一个 peer）；
+/// 2. 随机生成网络名/密钥，组装邀请载荷；
+/// 3. 编码 AG1. 离线串，并尝试向短码服务注册短码（失败不阻断）；
+/// 4. 组装房间 TOML 启动 EasyTier 实例；
+/// 5. 写入 current_room 并生成分享链接。
+///
+/// 返回 (房间会话, 分享 URL, 实例 ID)。
 pub async fn create_room_impl(
     state: &AppState,
     game_id: String,
     game_name: String,
     display_name: Option<String>,
 ) -> Result<(crate::models::ActiveRoom, String, String), (StatusCode, String)> {
+    // 仅启用状态的服务器进入邀请载荷。
     let servers = store::load_servers();
     let enabled: Vec<PeerEndpoint> = servers
         .iter()
@@ -403,6 +472,7 @@ pub async fn create_room_impl(
         ));
     }
 
+    // 组装邀请载荷：网络名/密钥每次建房随机生成，房间之间天然隔离。
     let payload = RoomInvitePayload {
         v: 1,
         game_id: game_id.clone(),
@@ -413,6 +483,7 @@ pub async fn create_room_impl(
         display_name: display_name.clone(),
     };
 
+    // AG1. 离线串是"保底邀请方式"，生成失败属于内部错误。
     let offline_invite = match invite::encode_offline_invite(&payload) {
         Ok(s) => s,
         Err(e) => {
@@ -420,6 +491,7 @@ pub async fn create_room_impl(
         }
     };
 
+    // 短码是"便捷邀请方式"：依赖外部短码服务，超时/异常时降级为仅离线串。
     let short_code = try_create_short_code(&payload).await.ok();
 
     let room = crate::models::ActiveRoom {
@@ -437,6 +509,7 @@ pub async fn create_room_impl(
         peers: payload.peers.clone(),
     };
 
+    // 用服务端资料（昵称/TUN/P2P/静态IP）+ 房间网络身份拼出 EasyTier TOML 并启动。
     let (hostname, disable_p2p, enable_tun, static_ipv4) = room_template_params(state);
     let toml = build_room_toml(&room, &hostname, disable_p2p, enable_tun, &static_ipv4);
     let instance_id = state.node.start(toml).await.map_err(|e| {
@@ -445,16 +518,19 @@ pub async fn create_room_impl(
             format!("启动实例失败: {e}"),
         )
     })?;
+    // 启动成功后才把房间写入内存会话。
     *state.current_room.lock().unwrap() = Some(room.clone());
     let share_url = invite::build_join_url(short_code.as_deref(), Some(&offline_invite));
     Ok((room, share_url, instance_id))
 }
 
+/// POST /api/room/join 请求体：邀请短码 / 完整链接 / AG1. 离线串（三选一原文）。
 #[derive(Deserialize)]
 pub struct JoinRoomRequest {
     input: String,
 }
 
+/// POST /api/room/join：REST 包装；成功后异步广播 room.joined 事件。
 pub async fn join_room(
     State(state): State<AppState>,
     Json(req): Json<JoinRoomRequest>,
@@ -489,11 +565,13 @@ pub async fn join_from_input(
         return Err((StatusCode::BAD_REQUEST, "房间邀请不能为空".into()));
     }
 
+    // 解析邀请（自动识别三种格式），失败统一转 400 并带上可读原因。
     let payload = resolve_invite(input)
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("解析邀请失败: {e}")))?;
 
     // 判断输入是否为短码，若是则保存以便前端显示
+    // （离线串加入时 short_code 为 None，房间码区域降级显示离线串前缀）。
     let short_code = extract_short_code(input);
 
     let room = crate::models::ActiveRoom {
@@ -507,10 +585,12 @@ pub async fn join_from_input(
             .clone()
             .unwrap_or_else(|| payload.game_name.clone()),
         short_code,
+        // 加入时也重新编码一份离线串存内存，保证离开前分享链接始终可生成。
         offline_invite: invite::encode_offline_invite(&payload).ok(),
         peers: payload.peers.clone(),
     };
 
+    // 与建房走同一套 TOML 模板，确保本机 TUN/P2P/静态 IP 设置一致生效。
     let (hostname, disable_p2p, enable_tun, static_ipv4) = room_template_params(state);
     let toml = build_room_toml(&room, &hostname, disable_p2p, enable_tun, &static_ipv4);
     let id = state
@@ -523,10 +603,12 @@ pub async fn join_from_input(
         room.short_code.as_deref(),
         room.offline_invite.as_deref(),
     );
+    // 注意：先算 share_url 再锁存房间（share_url 借用 room 字段）。
     *state.current_room.lock().unwrap() = Some(room.clone());
     Ok((room, share_url, id))
 }
 
+/// POST /api/room/leave：停止实例、清空当前房间，并广播 room.left（不发邮件）。
 pub async fn leave_room(State(state): State<AppState>) -> impl IntoResponse {
     state.node.stop().await;
     *state.current_room.lock().unwrap() = None;
@@ -538,6 +620,7 @@ pub async fn leave_room(State(state): State<AppState>) -> impl IntoResponse {
     Json(json!({ "ok": true }))
 }
 
+/// GET /api/room/current：返回内存中的当前房间与分享链接（无房间时 room=null）。
 pub async fn current_room(State(state): State<AppState>) -> impl IntoResponse {
     let room = state.current_room.lock().unwrap().clone();
     match room {
@@ -549,6 +632,8 @@ pub async fn current_room(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
+/// 按房间会话与本机资料拼装 EasyTier 实例 TOML 文本。
+/// 建房与加入共用，确保 [network_identity]、listeners、[[peer]]、[flags] 写法一致。
 fn build_room_toml(
     room: &crate::models::ActiveRoom,
     hostname: &str,
@@ -557,6 +642,7 @@ fn build_room_toml(
     static_ipv4: &str,
 ) -> String {
     let mut s = String::new();
+    // instance_name 固定；hostname 用面板昵称（对端客户端可见），写入前做 TOML 转义。
     s.push_str("instance_name = \"astral-server\"\n");
     s.push_str(&format!("hostname = \"{}\"\n", tml_escape(hostname)));
 
@@ -572,22 +658,27 @@ fn build_room_toml(
             s.push_str(&format!("ipv4 = \"{}\"\n", tml_escape(static_ip)));
             s.push_str("dhcp = false\n");
         } else {
+            // 未指定静态 IP：交由 EasyTier 内置 DHCP 分配。
             s.push_str("dhcp = true\n");
         }
     }
 
+    // 监听 tcp/udp 随机端口（0=由操作系统分配），对所有网卡开放。
     s.push_str("listeners = [\n");
     s.push_str("    \"tcp://0.0.0.0:0\",\n");
     s.push_str("    \"udp://0.0.0.0:0\",\n");
     s.push_str("]\n\n");
+    // 网络身份：同房间成员必须完全一致，否则无法互通。
     s.push_str("[network_identity]\n");
     s.push_str(&format!("network_name = \"{}\"\n", room.network_name));
     s.push_str(&format!("network_secret = \"{}\"\n", room.network_secret));
     s.push('\n');
+    // 每个中继/对等节点一个 [[peer]] 表（uri 来自邀请载荷，视为受控数据直接写入）。
     for p in &room.peers {
         s.push_str("[[peer]]\n");
         s.push_str(&format!("uri = \"{}\"\n", p.uri));
     }
+    // flags 与原版客户端对齐：关 KCP/QUIC 入站与中继，默认 TCP，压缩算法 2。
     s.push_str("\n[flags]\n");
     s.push_str(&format!("disable_p2p = {disable_p2p}\n"));
     // 与原版客户端对齐：压缩算法、KCP/QUIC 入站与中继开关。
@@ -603,11 +694,13 @@ fn build_room_toml(
     s
 }
 
+/// 最小 TOML 字符串转义：转义反斜杠与双引号（昵称/IP 均为单行 Basic String）。
 fn tml_escape(s: &str) -> String {
     s.replace('\\', r"\\").replace('"', r#"\""#)
 }
 
 /// 读取构建房间 TOML 所需的服务端配置。
+/// 返回 (昵称 hostname, 是否禁用P2P, 是否启用TUN, 静态IPv4)。
 fn room_template_params(state: &AppState) -> (String, bool, bool, String) {
     let cfg = state.server_config.read().unwrap();
     (
@@ -618,6 +711,8 @@ fn room_template_params(state: &AppState) -> (String, bool, bool, String) {
     )
 }
 
+/// 向短码服务注册邀请载荷，返回短码字符串。
+/// POST {短码服务}/v1/codes，body 为 RoomInvitePayload，15 秒超时。
 async fn try_create_short_code(payload: &RoomInvitePayload) -> anyhow::Result<String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -726,7 +821,9 @@ async fn resolve_invite(input: &str) -> anyhow::Result<RoomInvitePayload> {
     )
 }
 
+/// 用短码向短码服务换回邀请载荷；兼容载荷裸返回与 {data: ...} 包裹两种响应。
 async fn fetch_short_code(code: &str) -> anyhow::Result<RoomInvitePayload> {
+    // GET {短码服务}/v1/codes/{code}，15 秒超时。
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()?;
@@ -750,13 +847,14 @@ async fn fetch_short_code(code: &str) -> anyhow::Result<RoomInvitePayload> {
         return Ok(p);
     }
 
-    // 如果直接解析失败，尝试从嵌套字段提取
+    // 如果直接解析失败，尝试从嵌套字段提取（兼容 {data: payload} 包裹格式）。
     if let Some(data) = body.get("data") {
         if let Ok(p) = serde_json::from_value::<RoomInvitePayload>(data.clone()) {
             return Ok(p);
         }
     }
 
+    // 两种结构都对不上：把原始响应带回错误信息，便于排查服务端版本差异。
     anyhow::bail!(
         "短码服务返回的数据格式不匹配。原始响应: {}",
         serde_json::to_string_pretty(&body).unwrap_or_default()
@@ -765,6 +863,7 @@ async fn fetch_short_code(code: &str) -> anyhow::Result<RoomInvitePayload> {
 
 // ---------- 服务器列表 ----------
 
+/// GET /api/servers：返回 servers.json 中的全部中继服务器（含启用状态、排序）。
 pub async fn list_servers() -> impl IntoResponse {
     Json(json!({ "servers": store::load_servers() }))
 }
@@ -773,6 +872,7 @@ pub async fn list_servers() -> impl IntoResponse {
 pub async fn ping_servers() -> impl IntoResponse {
     let servers = store::load_servers();
     let mut handles = Vec::new();
+    // 每个服务器一个 tokio 任务并发探测，避免串行等待超时。
     for s in &servers {
         let id = s.id;
         let uri = s.uri.clone();
@@ -782,6 +882,7 @@ pub async fn ping_servers() -> impl IntoResponse {
         }));
     }
     let mut results = Vec::new();
+    // 按任务发起顺序收集；单个任务 panic 时回传 error 而不是整体失败。
     for h in handles {
         match h.await {
             Ok(r) => results.push(r),
@@ -792,8 +893,11 @@ pub async fn ping_servers() -> impl IntoResponse {
 }
 
 /// TCP 连接测延迟：从 URI 中解析 host:port，测量 TCP 握手耗时。
+/// 成功返回毫秒数；连接失败或 5 秒超时返回 -1（前端显示为"超时"）。
 async fn tcp_ping(uri: &str) -> i64 {
+    // 剥掉 scheme 前缀（tcp://、udp:// 等）；无 scheme 时整体当作 host。
     let (_scheme, rest) = uri.split_once("://").unwrap_or(("tcp", uri));
+    // 缺省端口按 EasyTier 默认 11010。
     let target = if rest.contains(':') {
         rest.to_string()
     } else {
@@ -807,16 +911,19 @@ async fn tcp_ping(uri: &str) -> i64 {
     .await
     {
         Ok(Ok(_)) => start.elapsed().as_millis() as i64,
+        // Ok(Err) = 连接被拒/不可达；Err = 超时。
         Ok(Err(_)) | Err(_) => -1,
     }
 }
 
+/// POST /api/servers 请求体：服务器名与 URI（如 tcp://1.2.3.4:11010）。
 #[derive(Deserialize)]
 pub struct AddServerRequest {
     name: String,
     uri: String,
 }
 
+/// POST /api/servers：新增服务器，默认启用，id 与排序号取当前最大值 +1。
 pub async fn add_server(Json(req): Json<AddServerRequest>) -> Response {
     let mut list = store::load_servers();
     let id = list.iter().map(|s| s.id).max().unwrap_or(0) + 1;
@@ -834,6 +941,7 @@ pub async fn add_server(Json(req): Json<AddServerRequest>) -> Response {
     }
 }
 
+/// PUT /api/servers/:id 请求体：三个字段均可选，只更新提交的字段。
 #[derive(Deserialize)]
 pub struct UpdateServerRequest {
     name: Option<String>,
@@ -841,6 +949,7 @@ pub struct UpdateServerRequest {
     enabled: Option<bool>,
 }
 
+/// PUT /api/servers/:id：按 id 修改服务器条目（局部更新）。
 pub async fn update_server(
     Path(id): Path<u64>,
     Json(req): Json<UpdateServerRequest>,
@@ -858,6 +967,7 @@ pub async fn update_server(
     }
 }
 
+/// DELETE /api/servers/:id：按 id 删除服务器；条目不存在返回 404。
 pub async fn delete_server(Path(id): Path<u64>) -> Response {
     let mut list = store::load_servers();
     let len_before = list.len();
@@ -873,6 +983,9 @@ pub async fn delete_server(Path(id): Path<u64>) -> Response {
 
 // ---------- 游戏列表 ----------
 
+/// GET /api/games：返回内置游戏目录（硬编码）。
+/// id 用于建房请求；"custom" 表示自定义网络（由客户端自行处理）；
+/// icon 为空串表示无图标，前端用默认占位图。
 pub async fn list_games() -> impl IntoResponse {
     Json(json!({
         "games": [
@@ -918,6 +1031,7 @@ pub async fn get_smtp(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
+/// PUT /api/smtp/recipients 请求体：收件人邮箱地址列表（全量覆盖）。
 #[derive(Deserialize)]
 pub struct RecipientsRequest {
     recipients: Vec<String>,
@@ -981,6 +1095,7 @@ pub async fn test_smtp(State(state): State<AppState>) -> Response {
 
 /// 一键发送当前房间详情邮件给所有收件人。
 pub async fn send_now_smtp(State(state): State<AppState>) -> Response {
+    // 克隆 SMTP 配置，避免持锁进行耗时网络发送。
     let smtp = { state.server_config.read().unwrap().smtp.clone() };
     if !smtp.enabled {
         return err(StatusCode::BAD_REQUEST, "SMTP 未启用（请在 config.toml 中开启并填写服务器参数）");
@@ -988,6 +1103,7 @@ pub async fn send_now_smtp(State(state): State<AppState>) -> Response {
     if smtp.recipients.is_empty() {
         return err(StatusCode::BAD_REQUEST, "收件人列表为空，请先添加收件邮箱");
     }
+    // 克隆房间快照（同样为了缩短锁持有时间）。
     let room = { state.current_room.lock().unwrap().clone() };
     let Some(room) = room else {
         return err(StatusCode::BAD_REQUEST, "当前无房间，请先创建或加入房间");
@@ -996,6 +1112,7 @@ pub async fn send_now_smtp(State(state): State<AppState>) -> Response {
         room.short_code.as_deref(),
         room.offline_invite.as_deref(),
     );
+    // 快照中含本机虚拟 IP 与在线成员，随邮件一起发送。
     let snap = state.node.snapshot();
     match tokio::time::timeout(
         std::time::Duration::from_secs(30),
@@ -1050,6 +1167,7 @@ fn is_valid_email(addr: &str) -> bool {
 
 // ---------- 在线更新 ----------
 
+/// POST /api/update/apply 请求体：GitHub 发行版资产直链（需通过域名白名单校验）。
 #[derive(Deserialize)]
 pub struct ApplyUpdateRequest {
     download_url: String,
@@ -1060,6 +1178,7 @@ pub async fn check_update() -> Response {
     let current = crate::update::current_version();
     match crate::update::fetch_latest_release().await {
         Ok(info) => {
+            // 语义版本比较；download_url 已在 update 模块按 linux+x86_64 资产过滤。
             let update_available = crate::update::is_newer(&info.tag_name, &current);
             Json(json!({
                 "current_version": current,
@@ -1072,6 +1191,7 @@ pub async fn check_update() -> Response {
             }))
             .into_response()
         }
+        // 网络/解析失败不抛 500：前端仍需展示 current_version。
         Err(e) => (
             StatusCode::BAD_GATEWAY,
             Json(json!({ "current_version": current, "error": e })),
@@ -1085,12 +1205,14 @@ pub async fn apply_update(Json(body): Json<ApplyUpdateRequest>) -> Response {
     if body.download_url.is_empty() {
         return err(StatusCode::BAD_REQUEST, "download_url 不能为空");
     }
+    // 安全白名单：只允许从 GitHub 官方域名下载，防止服务端被灌入任意二进制。
     if !body.download_url.starts_with("https://github.com/")
         && !body.download_url.starts_with("https://objects.githubusercontent.com/")
         && !body.download_url.starts_with("https://release-assets.githubusercontent.com/")
     {
         return err(StatusCode::BAD_REQUEST, "下载地址必须来自 GitHub");
     }
+    // 下载→chmod→备份→原子替换→systemctl restart 均在 update 模块内完成。
     match crate::update::apply_update(&body.download_url).await {
         Ok(()) => Json(json!({ "ok": true, "message": "更新已应用，服务即将重启" })).into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("更新失败: {e}")),

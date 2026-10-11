@@ -1,6 +1,10 @@
-//! 事件中心：服务器重启或房间码变动时，
+//! ==== 事件中心 ====
+//! 服务器重启或房间码变动时，
 //! ① 通过 WebSocket 向所有已连接服务广播房间内容/房间码/房间状态；
 //! ② 在存在房间且 SMTP 已配置时，自动发送通知邮件。
+//!
+//! 广播通道容量 64：突发事件堆积时丢弃最旧消息（tokio broadcast 语义），
+//! 保证慢消费者不会阻塞发布方。
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,16 +13,19 @@ use tokio::sync::broadcast;
 
 use crate::http::AppState;
 
+/// 进程内事件总线：所有 WebSocket 连接共享同一个 broadcast::Sender。
 pub struct EventHub {
     tx: broadcast::Sender<String>,
 }
 
 impl EventHub {
+    /// 创建事件总线（容量 64；接收端 lagged 时会丢失旧消息，属可接受取舍）。
     pub fn new() -> Self {
         let (tx, _rx) = broadcast::channel(64);
         Self { tx }
     }
 
+    /// 订阅事件流（每个 WebSocket 连接持有一个 Receiver）。
     pub fn subscribe(&self) -> broadcast::Receiver<String> {
         self.tx.subscribe()
     }
@@ -57,6 +64,7 @@ impl EventHub {
         let _ = state.hub.tx.send(payload.to_string());
 
         let room = { state.current_room.lock().unwrap().clone() };
+        // room.left 时房间已清空：只广播不发邮件。
         let Some(room) = room else { return };
         let smtp = { state.server_config.read().unwrap().smtp.clone() };
         if !smtp.enabled || smtp.recipients.is_empty() {
@@ -102,6 +110,7 @@ fn event_text(event: &str) -> (&'static str, &'static str) {
     }
 }
 
+/// 当前 UNIX 时间戳（秒）；时钟早于 1970 等异常情况回退为 0。
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

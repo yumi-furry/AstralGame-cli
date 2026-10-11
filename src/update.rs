@@ -1,10 +1,19 @@
-//! 在线更新：从 GitHub Releases 检查最新版本，下载并替换自身二进制。
+//! ==== 在线更新模块 ====
+//! 从 GitHub Releases 检查最新版本，下载并替换自身二进制。
+//!
+//! 版本约定：Cargo.toml 使用 semver 构建号写法 `1.4.2-3`，
+//! 运行时/API 展示统一转换为下划线 `1.4.2_3`；解析时两种写法等价。
+//!
+//! 替换流程（仅 Linux 实际生效）：
+//! 下载到 `<exe>.new` → chmod 755 → 旧文件改名 `<exe>.bak` →
+//! `.new` 原子 rename 为当前路径 → `sleep 1 && systemctl restart astral-server`。
 
 use serde_json::Value;
 
-/// 本仓库 releases 地址。
+/// 本仓库 releases 页面（供前端跳转展示 release 页）。
 #[allow(dead_code)]
 pub const REPO_RELEASES: &str = "https://github.com/yumi-furry/AstralGame-cli/releases";
+/// GitHub REST API：最新 release（无需鉴权，匿名限流 60 次/小时/IP）。
 const GITHUB_API_LATEST: &str =
     "https://api.github.com/repos/yumi-furry/AstralGame-cli/releases/latest";
 
@@ -42,10 +51,15 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
 
 /// 从 GitHub API 响应中提取最新版本信息。
 pub struct ReleaseInfo {
+    /// release tag（如 1.4.2_3 / v1.4.2）。
     pub tag_name: String,
+    /// release 标题。
     pub name: String,
+    /// release 说明正文（Markdown）。
     pub body: String,
+    /// release 网页地址。
     pub html_url: String,
+    /// linux x86_64 资产直链；没有匹配资产时为 None。
     pub download_url: Option<String>,
 }
 

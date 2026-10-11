@@ -20,10 +20,12 @@ use serde_json::json;
 use crate::http::AppState;
 use crate::models::WsServiceInfo;
 
+/// GET /api/ws 升级处理（鉴权由路由层中间件保证，进入此处即已登录）。
 pub async fn ws_upgrade(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
+/// 面板 WebSocket 连接生命周期：首包推快照，之后只做事件转发。
 async fn handle_socket(socket: WebSocket, state: AppState) {
     let mut rx = state.hub.subscribe();
 
@@ -73,6 +75,8 @@ pub struct ServiceWsQuery {
     service_type: Option<String>,
 }
 
+/// GET /api/ws/service 升级处理：query 携带 key/name/type，
+/// 密钥校验失败在 HTTP 握手阶段以 401 拒绝（不升级协议）。
 pub async fn ws_service_upgrade(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -97,6 +101,8 @@ pub async fn ws_service_upgrade(
     ws.on_upgrade(move |socket| handle_service_socket(socket, state, name, service_type, addr))
 }
 
+/// 第三方服务连接生命周期：登记 → hello → 快照 → 事件转发；
+/// 三路 select：被踢（密钥轮换）、广播消息、客户端断开，任一退出即注销登记。
 async fn handle_service_socket(
     socket: WebSocket,
     state: AppState,
@@ -105,10 +111,13 @@ async fn handle_service_socket(
     addr: SocketAddr,
 ) {
     let now = now_unix();
+    // 每条连接分配 UUID 作为注册表键。
     let id = uuid::Uuid::new_v4().to_string();
+    // 容量 1 的踢下线信令通道；注册表持有发送端，本任务持有接收端。
     let (kick_tx, mut kick_rx) = tokio::sync::mpsc::channel::<()>(1);
     let info = WsServiceInfo {
         id: id.clone(),
+        // 缺省上报名统一显示 unknown。
         name: if name.is_empty() { "unknown".to_string() } else { name },
         service_type: if service_type.is_empty() {
             "unknown".to_string()
@@ -176,6 +185,7 @@ async fn handle_service_socket(
 
 // ============================ 在线服务注册表 ============================
 
+/// 注册表条目：展示信息 + 踢下线信令发送端。
 struct Entry {
     info: WsServiceInfo,
     /// 踢下线信号（密钥刷新时触发）。
@@ -188,16 +198,19 @@ pub struct WsRegistry {
 }
 
 impl WsRegistry {
+    /// 创建空注册表。
     pub fn new() -> Self {
         Self {
             inner: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
+    /// 登记一条新连接（同 UUID 覆盖，正常不会发生）。
     pub fn add(&self, info: WsServiceInfo, kick: tokio::sync::mpsc::Sender<()>) {
         self.inner.write().unwrap().insert(info.id.clone(), Entry { info, kick });
     }
 
+    /// 连接结束时注销（重复移除无害）。
     pub fn remove(&self, id: &str) {
         self.inner.write().unwrap().remove(id);
     }
@@ -220,8 +233,10 @@ impl WsRegistry {
         let mut guard = self.inner.write().unwrap();
         let n = guard.len();
         for e in guard.values() {
+            // 通道满/关闭都忽略：连接任务退出时会自行 remove。
             let _ = e.kick.try_send(());
         }
+        // 立即清空登记，使在线列表即时归零（连接关闭帧异步发出）。
         guard.clear();
         n
     }
@@ -233,6 +248,7 @@ impl Default for WsRegistry {
     }
 }
 
+/// 当前 UNIX 时间戳（秒）。
 fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
