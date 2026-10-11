@@ -1,6 +1,6 @@
 # Astral Game P2P Server (CLI + Web 管理端)
 
-基于 EasyTier 开发的服务器版 Astral 联机工具，适配 Debian/Ubuntu 无头服务器。内置 Web 管理界面，可通过浏览器管理服务器、创建/加入房间。当前版本 **1.4.2_3**。
+基于 EasyTier 开发的服务器版 Astral 联机工具，适配 Debian/Ubuntu 无头服务器。内置 Web 管理界面，可通过浏览器管理服务器、创建/加入房间。当前版本 **1.4.2_4**。
 
 ---
 
@@ -161,7 +161,7 @@ cargo build --release
 ```toml
 [astral_server]
 web_bind = "0.0.0.0"    # 监听地址
-web_port = 1786         # 监听端口
+web_port = 8080         # 监听端口
 username = "admin"      # 登录用户名（留空则不鉴权）
 password = "yourpass"   # 登录密码
 log_level = "info"      # 日志级别：trace / debug / info / warn / error
