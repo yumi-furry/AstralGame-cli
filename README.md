@@ -264,7 +264,7 @@ ws://<服务器地址>:<端口>/api/ws
     "my_ipv4": "10.126.0.2",
     "total_nodes": 3,
     "error": null,
-    "server_version": "1.4.2_3",
+    "server_version": "1.4.2_4",
     "easytier_version": "1.x.x"
   }
 }
@@ -341,6 +341,8 @@ ws://<服务器地址>:<端口>/api/ws/service?key=<密钥>&name=<服务名称>&
 - `name` / `type` 由连接方上报（如 `name=MyBot&type=AstrBOT`），服务器记录**初次连接时间**与远端地址。
 - 连接成功后先收到一条 `event: "hello"`（含连接 ID、名称、类型、初次连接时间），随后收到当前快照，
   之后与面板端一样实时接收 `snapshot` / `server.started` / `room.created` / `room.joined` / `room.left` 事件。
+- 除被动接收事件外，**1.4.2_4 起还支持发送指令**（查询房间 / 重启 / 关闭 / 开启 / 加入房间），
+  详见下文「第三方服务指令协议」；控制类指令需先在面板开启「允许服务端控制」。
 
 **Node.js 示例**
 
@@ -377,6 +379,63 @@ async def listen():
                 print(msg["event"], msg.get("room", {}).get("short_code") if msg.get("room") else "无房间")
 
 asyncio.run(listen())
+```
+
+### 第三方服务指令协议（1.4.2_4 起）
+
+连接成功后除被动接收事件外，可发送指令并收到应答。**控制类指令**（`restart` / `close` / `open` / `join`）
+需服务端开启 `service_control_enabled`（面板「设置 → 第三方服务 → 允许服务端控制」，默认关闭）；
+只读指令 `get_room_info` 不受开关限制。
+
+**请求**（JSON 文本帧，`id` 为可选关联号，应答会原样回显）：
+
+| action | 说明 | 额外字段 |
+|---|---|---|
+| `get_room_info` | 查询房间类型、成员列表（含延迟）、运行时长 | 无 |
+| `restart` | 用最近一次配置重启实例 | 无 |
+| `close` | 关闭房间（停止实例并清空当前房间） | 无 |
+| `open` | 开启房间：带 `game_id` / `game_name` 走建房流程；不带则仅重放上次配置启动 | `game_id`、`game_name`、`display_name`（可选） |
+| `join` | 加入房间 | `input`（短码 / 完整链接 / AG1. 离线串） |
+
+```json
+{"id":"r1","action":"get_room_info"}
+{"id":"r4","action":"open","game_id":"minecraft","game_name":"我的世界"}
+{"id":"r6","action":"join","input":"ABC123"}
+```
+
+**应答**（`event: "result"`）：
+
+```json
+{"event":"result","id":"r4","ok":true,"data":{"instance_id":"...","room":{...},"share_url":"..."}}
+{"event":"result","id":"r6","ok":false,"error":"第三方服务控制未开启（请在面板设置 → 第三方服务 中启用）"}
+```
+
+`get_room_info` 的 `data` 结构：
+
+```json
+{
+  "running": true,
+  "uptime_secs": 3600,
+  "room_type": {"game_id":"minecraft","game_name":"我的世界","display_name":"...","is_host":true},
+  "room": { "...同事件消息格式..." },
+  "share_url": "https://next.astral.fan/j?c=ABC123",
+  "node": {"my_ipv4":"10.126.0.2","total_nodes":3,"error":null},
+  "members": [{"peer_id":0,"hostname":"...","ipv4":"...","latency_ms":0,"loss_rate":0,"conn_type":"Local",...}]
+}
+```
+
+**Node.js 示例**
+
+```javascript
+const WebSocket = require('ws');
+const ws = new WebSocket('ws://192.168.1.10:1786/api/ws/service?key=你的密钥&name=MyBot&type=AstrBOT');
+ws.on('open', () => ws.send(JSON.stringify({ id: 'r1', action: 'get_room_info' })));
+ws.on('message', (data) => {
+  const msg = JSON.parse(data.toString());
+  if (msg.event === 'result') {
+    console.log(msg.id, msg.ok ? JSON.stringify(msg.data) : msg.error);
+  }
+});
 ```
 
 **管理接口**（需面板 Cookie / Basic Auth）：
