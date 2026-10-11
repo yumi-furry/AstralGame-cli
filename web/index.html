@@ -479,6 +479,10 @@ textarea { font-family:"Cascadia Code",Consolas,monospace; font-size:12px; }
             <button class="btn btn-danger btn-sm" onclick="rotateWsKey()">刷新密钥</button>
           </div>
         </div>
+        <div class="settings-row">
+          <div><div class="settings-label">允许服务端控制</div><div class="settings-desc">开启后第三方服务可发送指令：查询房间信息、重启 / 关闭 / 开启 / 加入房间</div></div>
+          <label class="switch"><input type="checkbox" id="service-control" onchange="toggleServiceControl(this.checked)"><span class="slider"></span></label>
+        </div>
         <div class="warn-note">第三方软件（如 AstrBOT 插件）通过 <code id="ws-service-url">/api/ws/service?key=…&amp;name=…&amp;type=…</code> 连接。刷新密钥后旧密钥立即失效，所有已连接服务将被断开。</div>
         <div style="margin-top:14px;">
           <div class="settings-label" style="margin-bottom:8px;">在线服务 <span class="tag" id="ws-services-count" style="color:var(--text2);">0</span></div>
@@ -724,7 +728,7 @@ function themeOptHtml(t, cur) {
 // 资料页可选的房间图标 emoji 列表（无自定义头像时展示给对端）。
 const ICONS = ['🎮','👾','🕹️','⛏️','🚗','🏭','🛶','⚔️','🐱','🐶','🐰','🦊','🐼','🐸','🦁','🐙','🧙','🎯','🎲','🧩','🌐','💻','🖥️','📡','⚙️','🚀'];
 // 服务端资料的本地缓存（与 /api/profile 字段对应）；avatar 为待展示的 base64。
-let profile = { nickname:'服务器', icon:'🎮', disable_p2p:false, enable_tun:true, static_ipv4:'', avatar:null, auto_join_enabled:false, auto_join_code:'', auto_create_enabled:false, auto_create_game_id:'', auto_create_game_name:'' };
+let profile = { nickname:'服务器', icon:'🎮', disable_p2p:false, enable_tun:true, static_ipv4:'', avatar:null, auto_join_enabled:false, auto_join_code:'', auto_create_enabled:false, auto_create_game_id:'', auto_create_game_name:'', service_control_enabled:false };
 // 编辑弹窗里暂存的新头像（未点保存前不覆盖 profile）；avatarDirty 标记是否有改动。
 let pendingAvatar = null;
 let avatarDirty = false;
@@ -820,7 +824,7 @@ function renderAvatar(el, base64, emoji) {
 async function loadProfile() {
   try {
     const d = await api('/profile');
-    profile = { nickname:d.nickname||'服务器', icon:d.icon||'🎮', disable_p2p:!!d.disable_p2p, enable_tun:d.enable_tun!==false, static_ipv4:d.static_ipv4||'', avatar:d.avatar||null, auto_join_enabled:!!d.auto_join_enabled, auto_join_code:d.auto_join_code||'', auto_create_enabled:!!d.auto_create_enabled, auto_create_game_id:d.auto_create_game_id||'', auto_create_game_name:d.auto_create_game_name||'' };
+    profile = { nickname:d.nickname||'服务器', icon:d.icon||'🎮', disable_p2p:!!d.disable_p2p, enable_tun:d.enable_tun!==false, static_ipv4:d.static_ipv4||'', avatar:d.avatar||null, auto_join_enabled:!!d.auto_join_enabled, auto_join_code:d.auto_join_code||'', auto_create_enabled:!!d.auto_create_enabled, auto_create_game_id:d.auto_create_game_id||'', auto_create_game_name:d.auto_create_game_name||'', service_control_enabled:!!d.service_control_enabled };
     applyProfileUI();
   } catch(e) {}
 }
@@ -837,6 +841,8 @@ function applyProfileUI() {
   document.getElementById('disable-p2p').checked = profile.disable_p2p;
   document.getElementById('enable-tun').checked = profile.enable_tun;
   document.getElementById('static-ipv4').value = profile.static_ipv4;
+  const scEl = document.getElementById('service-control');
+  if (scEl) scEl.checked = profile.service_control_enabled;
   document.getElementById('auto-join-enabled').checked = profile.auto_join_enabled || profile.auto_create_enabled;
   document.getElementById('auto-join-code').value = profile.auto_join_code;
   // 模式：仅当某模式启用时才切换 radio；都关闭时保留用户当前选择
@@ -998,6 +1004,14 @@ async function saveStaticIp() {
     profile.static_ipv4 = d.static_ipv4;
     toast(ip ? '静态 IP 已保存（下次建房生效）' : '已恢复自动分配（下次建房生效）');
   } catch(e){ toast(e.message,'error'); }
+}
+// 第三方服务控制指令开关：开启后持有 ws_key 的连接才能发送控制指令。
+async function toggleServiceControl(checked) {
+  try {
+    const d = await api('/profile',{method:'PUT',body:JSON.stringify({service_control_enabled:checked})});
+    profile.service_control_enabled = d.service_control_enabled;
+    toast(checked ? '已允许第三方服务控制房间' : '已禁止第三方服务控制房间');
+  } catch(e){ document.getElementById('service-control').checked = !checked; toast(e.message,'error'); }
 }
 
 /* ================= 在线更新 ================= */

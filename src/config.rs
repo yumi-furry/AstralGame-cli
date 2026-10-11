@@ -70,6 +70,10 @@ pub struct ServerConfig {
     /// WebSocket 第三方服务连接密钥（留空则启动时自动生成随机密钥）。
     #[serde(default)]
     pub ws_key: String,
+    /// 是否允许第三方服务发送控制指令（重启/关闭/开启/加入房间）。
+    /// 默认关闭；开启后任何持有 ws_key 的连接都能执行控制类操作。
+    #[serde(default)]
+    pub service_control_enabled: bool,
 }
 
 /// SMTP 发信配置。
@@ -155,6 +159,7 @@ impl Default for ServerConfig {
             auto_create_game_name: String::new(),
             smtp: SmtpConfig::default(),
             ws_key: String::new(),
+            service_control_enabled: false,
         }
     }
 }
@@ -329,6 +334,15 @@ recipients = ["a@example.com"]   # 收件人列表（可在面板编辑）
 # 连接成功后会出现在面板「设置 → 第三方服务」列表中。留空则启动时自动生成随机密钥。
 # -----------------------------------------------------------------------------
 # ws_key = ""
+
+# -----------------------------------------------------------------------------
+# 第三方服务控制开关（默认关闭）
+# 开启后，持有上面 ws_key 的第三方服务除接收房间事件外，还可以发送指令：
+#   get_room_info 查询房间类型/成员延迟/运行时长；restart 重启；close 关闭；
+#   open 开启（带 game_id/game_name 建房，不带则重放上次配置）；join 加入房间。
+# 该开关也可以在面板「设置 → 第三方服务」中切换。
+# -----------------------------------------------------------------------------
+service_control_enabled = false
 
 # -----------------------------------------------------------------------------
 # 以下是 EasyTier 节点配置

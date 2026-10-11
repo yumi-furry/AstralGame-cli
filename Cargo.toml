@@ -4,8 +4,8 @@
 
 [package]
 name = "astral-server"
-# semver 合法写法用 "-"；运行时显示时由 update::current_version() 还原为 "1.4.2_3"。
-version = "1.4.2-3"
+# semver 合法写法用 "-"；运行时显示时由 update::current_version() 还原为 "1.4.2_4"。
+version = "1.4.2-4"
 edition = "2021"
 description = "Astral Game P2P server (headless) with embedded web management"
 license = "MIT"

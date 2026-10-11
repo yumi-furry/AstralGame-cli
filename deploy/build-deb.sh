@@ -94,3 +94,15 @@ chmod 755 "$ROOT/DEBIAN/prerm"
 mkdir -p dist
 dpkg-deb --build --root-owner-group "$ROOT" "dist/${PKG}_${VERSION}_${ARCH}.deb"
 echo "[build-deb] 已生成: dist/${PKG}_${VERSION}_${ARCH}.deb"
+
+# 额外产出一份命名合规的裸二进制：在线更新的资产匹配条件要求文件名同时包含
+# "linux" 与 "x86_64"（见 src/update.rs 的资产过滤），供 GitHub Release 直接上传。
+if [ "$TARGET" = "aarch64-unknown-linux-gnu" ]; then
+    cp "$BIN" dist/astral-server-linux-aarch64
+    chmod 755 dist/astral-server-linux-aarch64
+    echo "[build-deb] 已生成: dist/astral-server-linux-aarch64"
+else
+    cp "$BIN" dist/astral-server-linux-x86_64
+    chmod 755 dist/astral-server-linux-x86_64
+    echo "[build-deb] 已生成: dist/astral-server-linux-x86_64"
+fi

@@ -120,6 +120,8 @@ pub struct NodeRuntime {
     logs: Arc<Mutex<VecDeque<LogEntry>>>,
     /// 最近一次状态快照（轮询任务写，API 读）。
     snapshot: Arc<RwLock<Snapshot>>,
+    /// 当前实例启动时刻（unix 秒）；用于计算房间/实例已运行时长，未启动为 None。
+    started_at: Mutex<Option<u64>>,
     /// 服务配置（peer-RPC 回应昵称时读，与 AppState 共享同一份）。
     profile: Arc<RwLock<ServerConfig>>,
     /// peer-RPC 入站处理任务句柄（stop 时 abort）。
@@ -135,6 +137,7 @@ impl NodeRuntime {
             toml: Mutex::new(None),
             logs: Arc::new(Mutex::new(VecDeque::new())),
             snapshot: Arc::new(RwLock::new(Snapshot::idle())),
+            started_at: Mutex::new(None),
             profile,
             rpc_task: Mutex::new(None),
         })
@@ -175,6 +178,8 @@ impl NodeRuntime {
         // 记录当前实例与配置（stop/restart 依赖它们）。
         *self.current_id.lock().unwrap() = Some(id);
         *self.toml.lock().unwrap() = Some(config_toml);
+        // 记录启动时刻，供房间运行时长查询。
+        *self.started_at.lock().unwrap() = Some(now_unix());
         self.push_log("info", format!("实例已创建 instance_id={id}"));
 
         // 订阅该实例的内核事件总线，转发到内存日志缓冲。
@@ -337,6 +342,8 @@ impl NodeRuntime {
         }
         // 取出并清空当前实例 ID，再请求内核删除实例（停监听、删 TUN、断连接）。
         let id = { self.current_id.lock().unwrap().take() };
+        // 实例已停止，启动时刻一并清空（未运行时 uptime 为 None）。
+        *self.started_at.lock().unwrap() = None;
         if let Some(id) = id {
             if let Err(e) = self.manager.delete_network_instance(vec![id]) {
                 self.push_log("error", format!("停止实例失败: {e}"));
@@ -367,6 +374,12 @@ impl NodeRuntime {
     /// 取当前状态快照的克隆（API 每 2 秒轮询一次，代价很小）。
     pub fn snapshot(&self) -> Snapshot {
         self.snapshot.read().map(|s| s.clone()).unwrap_or_else(|_| Snapshot::idle())
+    }
+
+    /// 当前实例已运行秒数（从未启动过或已停止时为 None）。
+    pub fn uptime_secs(&self) -> Option<u64> {
+        let started = *self.started_at.lock().unwrap();
+        started.map(|s| now_unix().saturating_sub(s))
     }
 
     /// 取最近 tail 条日志（环形缓冲里不足时全量返回）。

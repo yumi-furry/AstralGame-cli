@@ -140,6 +140,8 @@ pub struct PutProfileRequest {
     auto_create_game_id: Option<String>,
     /// 自动创建预设游戏名称
     auto_create_game_name: Option<String>,
+    /// 是否允许第三方服务发送控制指令（重启/关闭/开启/加入房间）
+    service_control_enabled: Option<bool>,
 }
 
 /// GET /api/profile：返回面板"资料/网络/守护进程"相关设置；头像读 avatar.bin 并 base64 内联。
@@ -162,6 +164,7 @@ pub async fn get_profile(State(state): State<AppState>) -> impl IntoResponse {
         "auto_create_enabled": cfg.auto_create_enabled,
         "auto_create_game_id": cfg.auto_create_game_id,
         "auto_create_game_name": cfg.auto_create_game_name,
+        "service_control_enabled": cfg.service_control_enabled,
     }))
 }
 
@@ -214,6 +217,9 @@ pub async fn put_profile(
         }
         if let Some(gname) = req.auto_create_game_name {
             cfg.auto_create_game_name = gname.trim().to_string();
+        }
+        if let Some(sc) = req.service_control_enabled {
+            cfg.service_control_enabled = sc;
         }
         // 二选一：启用自动加入则关闭自动创建，反之亦然
         if cfg.auto_join_enabled {
@@ -272,6 +278,7 @@ pub async fn put_profile(
         "auto_create_enabled": cfg.auto_create_enabled,
         "auto_create_game_id": cfg.auto_create_game_id,
         "auto_create_game_name": cfg.auto_create_game_name,
+        "service_control_enabled": cfg.service_control_enabled,
     }))
     .into_response()
 }
@@ -610,6 +617,13 @@ pub async fn join_from_input(
 
 /// POST /api/room/leave：停止实例、清空当前房间，并广播 room.left（不发邮件）。
 pub async fn leave_room(State(state): State<AppState>) -> impl IntoResponse {
+    close_room_impl(&state).await;
+    Json(json!({ "ok": true }))
+}
+
+/// 关闭房间核心实现：停止实例、清空当前房间、异步广播 room.left。
+/// 同时供 REST 处理器与第三方服务 WebSocket 控制指令复用，避免行为分叉。
+pub async fn close_room_impl(state: &AppState) {
     state.node.stop().await;
     *state.current_room.lock().unwrap() = None;
     // 广播房间已离开（room=null，不发邮件）
@@ -617,7 +631,6 @@ pub async fn leave_room(State(state): State<AppState>) -> impl IntoResponse {
     tokio::spawn(async move {
         crate::notify::EventHub::publish(&st, "room.left").await;
     });
-    Json(json!({ "ok": true }))
 }
 
 /// GET /api/room/current：返回内存中的当前房间与分享链接（无房间时 room=null）。
