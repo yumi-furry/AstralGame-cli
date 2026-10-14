@@ -37,7 +37,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(
     name = "astral-server",
-    version = "1.4.2_4",
+    version = "1.5.1",
     about = "Astral Game P2P server (headless) with embedded web management"
 )]
 struct Cli {

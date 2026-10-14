@@ -4,8 +4,7 @@
 
 [package]
 name = "astral-server"
-# semver 合法写法用 "-"；运行时显示时由 update::current_version() 还原为 "1.4.2_4"。
-version = "1.4.2-4"
+version = "1.5.1"
 edition = "2021"
 description = "Astral Game P2P server (headless) with embedded web management"
 license = "MIT"
@@ -19,7 +18,7 @@ path = "src/main.rs"
 # ---------- 组网内核 ----------
 # Astral 的 EasyTier fork（含 astral_app_rpc / 凭据管理 / secure_mode 处理），
 # 锁定到指定 commit 以保证 API 与行为可复现。
-easytier = { git = "https://github.com/ldoubil/EasyTier.git", rev = "d76c8db55613800f9d8064af7504e80e921968d8" }
+easytier = { git = "https://github.com/ldoubil/EasyTier.git", rev = "fed1932ac59ce368edcaf9e2f23864086b1aeb51" }
 
 # ---------- 异步运行时 / Web 框架 ----------
 tokio = { version = "1", features = ["full"] }          # 异步运行时（信号、任务、TCP、同步原语等全特性）

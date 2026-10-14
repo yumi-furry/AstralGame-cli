@@ -663,17 +663,22 @@ fn build_room_toml(
     if !enable_tun {
         s.push_str("no_tun = true\n");
         s.push_str("dhcp = false\n");
+        s.push_str("dhcpv6 = false\n");
     } else {
         // 静态 IP 模式：写入顶层 ipv4 键并关闭 DHCP。
-        // 与上游 v1.4.2 客户端修复对齐：必须写顶层，不能写 [flags] 里。
+        // 与上游客户端修复对齐：必须写顶层，不能写 [flags] 里。
         let static_ip = static_ipv4.trim();
         if !static_ip.is_empty() {
             s.push_str(&format!("ipv4 = \"{}\"\n", tml_escape(static_ip)));
             s.push_str("dhcp = false\n");
         } else {
             // 未指定静态 IP：交由 EasyTier 内置 DHCP 分配。
-            s.push_str("dhcp = true\n");
+            // 对齐上游 v1.5.1：显式给初始网段而不是裸 true，避开默认 10.126.126.0/24，
+            // 减少与家用 10.x / 192.168.x 网段撞车（尤其移动 CGNAT 环境）。
+            s.push_str("dhcp = \"100.100.100.0/24\"\n");
         }
+        // 对齐上游 v1.5.1 默认：DHCPv6 自动分配虚拟 IPv6（ULA，fc00::/7 内）。
+        s.push_str("dhcpv6 = \"fdae::/120\"\n");
     }
 
     // 监听 tcp/udp 随机端口（0=由操作系统分配），对所有网卡开放。

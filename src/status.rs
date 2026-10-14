@@ -3,8 +3,8 @@
 //! 供 /api/status 返回给面板，字段口径与 Astral Game 官方客户端一致。
 //! 移植自 astral_rust_core 的 `network_status_from_info` / `peer_route_pairs_from_info`。
 
-use easytier::launcher::NetworkInstanceRunningInfo;
 use easytier::proto::api::instance::{list_peer_route_pair, PeerRoutePair, Route};
+use easytier::proto::api::manage::NetworkInstanceRunningInfo;
 use serde::Serialize;
 
 /// 本机在节点列表中的合成 peer_id（内核真实 peer_id 不为 0，
@@ -121,7 +121,7 @@ pub fn network_status_from_info(info: NetworkInstanceRunningInfo) -> NetworkStat
         let lat_ms = if route.cost == 1 {
             p.get_latency_ms().unwrap_or(0.0)
         } else {
-            route.path_latency_latency_first() as f64
+            route.path_latency_latency_first.unwrap_or(0) as f64
         };
 
         // get_loss_rate 返回 0~1 的比例，转百分比。

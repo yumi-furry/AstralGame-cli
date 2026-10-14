@@ -18,15 +18,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use easytier::common::config::{
-    process_secure_mode_cfg, ConfigFileControl, ConfigLoader, TomlConfigLoader,
+    normalize_secure_mode_config, ConfigFileControl, ConfigLoader, TomlConfigLoader,
 };
 use easytier::common::global_ctx::{EventBusSubscriber, GlobalCtxEvent};
-use easytier::instance_manager::NetworkInstanceManager;
-use easytier::proto::api::instance::{
-    GenerateCredentialRequest, ListCredentialsRequest, RevokeCredentialRequest,
+use easytier::instance::factory::{
+    native_cli_instance_manager, NativeCoreInstance, NativeInstanceManager,
 };
-use easytier::proto::rpc_types::controller::BaseController;
-use easytier::rpc_service::InstanceRpcService;
+use easytier::peers::credential_manager::CredentialCreateOptions;
 
 use crate::config::ServerConfig;
 use crate::status::{self, NetworkStatus};
@@ -111,7 +109,7 @@ pub struct CredentialInfo {
 /// 节点运行时（整个服务期间单例，Arc 共享）。
 pub struct NodeRuntime {
     /// EasyTier 实例管理器（可同时管多个实例，本服务同一时刻只跑一个）。
-    manager: Arc<NetworkInstanceManager>,
+    manager: Arc<NativeInstanceManager>,
     /// 当前运行中的实例 ID（None 表示未运行）。
     current_id: Mutex<Option<Uuid>>,
     /// 最近一次启动使用的 TOML（restart 时原样重放）。
@@ -132,7 +130,7 @@ impl NodeRuntime {
     /// 创建运行时单例（不启动任何网络实例）。
     pub fn new(profile: Arc<RwLock<ServerConfig>>) -> Arc<Self> {
         Arc::new(Self {
-            manager: Arc::new(NetworkInstanceManager::new()),
+            manager: Arc::new(native_cli_instance_manager()),
             current_id: Mutex::new(None),
             toml: Mutex::new(None),
             logs: Arc::new(Mutex::new(VecDeque::new())),
@@ -154,7 +152,7 @@ impl NodeRuntime {
         // secure_mode：启用时由内核生成本地密钥对（凭据组网相关），需先处理再运行实例。
         if let Some(sm) = cfg.get_secure_mode() {
             if sm.enabled {
-                let processed = process_secure_mode_cfg(sm).map_err(|e| e.to_string())?;
+                let processed = normalize_secure_mode_config(sm).map_err(|e| e.to_string())?;
                 cfg.set_secure_mode(Some(processed));
                 self.push_log("info", "secure_mode: 本地密钥已生成/加载");
             }
@@ -162,10 +160,11 @@ impl NodeRuntime {
 
         // dev_name 要在 run 之前取出（cfg 随后被管理器接管），供网卡路由修复任务使用。
         let dev_name = cfg.get_flags().dev_name.clone();
-        // 创建并运行网络实例；第二个参数表示阻塞等待部分初始化，STATIC_CONFIG 表示配置不再热加载。
+        // 创建并运行网络实例；STATIC_CONFIG 表示配置不再热加载。
+        // 注意：实例是异步启动的，返回 Ok 仅代表注册成功，启动失败会体现在事件日志里。
         let id = self
             .manager
-            .run_network_instance(cfg, true, ConfigFileControl::STATIC_CONFIG)
+            .run_network_instance(cfg, ConfigFileControl::STATIC_CONFIG)
             .map_err(|e| format!("启动实例失败: {e}"))?;
 
         // 对齐上游 v1.4.2 的网卡跃点修复（Linux 等价：组播/广播路由指向 TUN 并压低 metric）。
@@ -183,16 +182,15 @@ impl NodeRuntime {
         self.push_log("info", format!("实例已创建 instance_id={id}"));
 
         // 订阅该实例的内核事件总线，转发到内存日志缓冲。
-        if let Some(sub) = self
-            .manager
-            .iter()
-            .find(|it| *it.key() == id)
-            .and_then(|it| it.value().subscribe_event())
-        {
-            let logs = self.logs.clone();
-            tokio::spawn(async move {
-                forward_events(sub, logs).await;
-            });
+        // 事件订阅尽早挂上：启动失败（如 TUN 创建失败）也能在面板日志里看到原因。
+        if let Some(instance) = self.manager.instance(id) {
+            if let Some(sub) = easytier::instance::factory::subscribe_native_instance_event(&instance)
+            {
+                let logs = self.logs.clone();
+                tokio::spawn(async move {
+                    forward_events(sub, logs).await;
+                });
+            }
         }
 
         // 启动应用层 peer-RPC 监听与 2 秒一次的状态轮询。
@@ -263,19 +261,19 @@ impl NodeRuntime {
         tokio::spawn(async move {
             loop {
                 // 实例已从管理器消失（被 stop/异常退出）：标记未运行并结束轮询。
-                if !manager.list_network_instance_ids().contains(&id) {
+                let Some(instance) = manager.instance(id) else {
                     if let Ok(mut s) = snapshot.write() {
                         s.running = false;
                     }
                     break;
-                }
-                let running = manager.iter().any(|it| it.value().is_easytier_running());
+                };
+                let running = instance.is_ready();
                 // 读旧快照做底（保留版本号等不变字段），再覆盖运行态字段。
                 let mut snap = snapshot.read().map(|s| s.clone()).unwrap_or_else(|_| Snapshot::idle());
                 snap.running = running;
                 snap.instance_id = Some(id.to_string());
                 // 拉取网络信息并转换成前端节点列表 DTO。
-                if let Some(info) = manager.get_network_info(&id).await {
+                if let Some(info) = manager.network_info(id).await {
                     snap.error = info.error_msg.clone();
                     let st = status::network_status_from_info(info);
                     snap.my_ipv4 = node_ipv4(&st);
@@ -345,7 +343,7 @@ impl NodeRuntime {
         // 实例已停止，启动时刻一并清空（未运行时 uptime 为 None）。
         *self.started_at.lock().unwrap() = None;
         if let Some(id) = id {
-            if let Err(e) = self.manager.delete_network_instance(vec![id]) {
+            if let Err(e) = self.manager.delete_network_instances(vec![id]).await {
                 self.push_log("error", format!("停止实例失败: {e}"));
             } else {
                 self.push_log("info", format!("实例已停止 instance_id={id}"));
@@ -394,19 +392,19 @@ impl NodeRuntime {
         push_log_into(&self.logs, level, msg);
     }
 
-    /// 获取当前实例的 RPC 服务句柄（凭据管理走它）。
-    /// 实例刚启动时 RPC 可能尚未注册，因此以 50ms 间隔轮询，最多等 5 秒。
-    async fn instance_rpc(&self) -> Result<Arc<dyn InstanceRpcService>, String> {
+    /// 获取当前实例句柄（凭据管理直接调实例方法）。
+    /// 实例刚启动时可能尚未注册完成，因此以 50ms 间隔轮询，最多等 5 秒。
+    async fn instance(&self) -> Result<Arc<NativeCoreInstance>, String> {
         let id = { *self.current_id.lock().unwrap() };
         let id = id.ok_or("实例未运行")?;
         let step = Duration::from_millis(50);
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
-            if let Some(svc) = self.manager.get_instance_service(&id) {
-                return Ok(svc);
+            if let Some(inst) = self.manager.instance(id) {
+                return Ok(inst);
             }
             if std::time::Instant::now() >= deadline {
-                return Err("实例 RPC 服务尚未就绪".into());
+                return Err("实例尚未就绪".into());
             }
             tokio::time::sleep(step).await;
         }
@@ -421,60 +419,41 @@ impl NodeRuntime {
         if ttl_seconds <= 0 {
             return Err("ttl_seconds 必须大于 0".into());
         }
-        let svc = self.instance_rpc().await?;
+        let instance = self.instance().await?;
         // groups / proxy_cidrs 留空：不做分组与代播网段限制；allow_relay 允许凭据节点走中继。
-        let resp = svc
-            .get_credential_manage_service()
-            .generate_credential(
-                BaseController::default(),
-                GenerateCredentialRequest {
-                    groups: vec![],
-                    allow_relay: true,
-                    allowed_proxy_cidrs: vec![],
-                    ttl_seconds,
-                    credential_id: None,
-                    instance: None,
-                    reusable: Some(reusable),
-                },
-            )
-            .await
+        let resp = instance
+            .generate_credential(CredentialCreateOptions {
+                groups: vec![],
+                allow_relay: true,
+                allowed_proxy_cidrs: vec![],
+                ttl: Duration::from_secs(ttl_seconds as u64),
+                credential_id: None,
+                reusable,
+            })
             .map_err(|e| e.to_string())?;
         // 额外推导公钥返回，方便面板直接展示。
-        let pubkey_b64 = pubkey_b64_from_credential_secret(&resp.credential_secret)?;
+        let pubkey_b64 = pubkey_b64_from_credential_secret(&resp.secret)?;
         Ok(GeneratedCredential {
             credential_id: resp.credential_id,
-            credential_secret: resp.credential_secret,
+            credential_secret: resp.secret,
             pubkey_b64,
         })
     }
 
     /// 按 ID 撤销凭据（已分发的凭据立即失效），返回内核是否报告成功。
     pub async fn revoke_credential(&self, credential_id: String) -> Result<bool, String> {
-        let svc = self.instance_rpc().await?;
-        svc.get_credential_manage_service()
-            .revoke_credential(
-                BaseController::default(),
-                RevokeCredentialRequest {
-                    credential_id,
-                    instance: None,
-                },
-            )
-            .await
-            .map(|r| r.success)
+        let instance = self.instance().await?;
+        instance
+            .revoke_credential(&credential_id)
             .map_err(|e| e.to_string())
     }
 
     /// 列出实例上全部凭据（面板"进网凭据"卡片使用）。
     pub async fn list_credentials(&self) -> Result<Vec<CredentialInfo>, String> {
-        let svc = self.instance_rpc().await?;
-        let resp = svc
-            .get_credential_manage_service()
-            .list_credentials(BaseController::default(), ListCredentialsRequest { instance: None })
-            .await
-            .map_err(|e| e.to_string())?;
+        let instance = self.instance().await?;
         // 内核类型 → 前端 DTO；reusable 缺省按可复用处理（兼容旧内核）。
-        Ok(resp
-            .credentials
+        Ok(instance
+            .credential_snapshots()
             .into_iter()
             .map(|c| CredentialInfo {
                 credential_id: c.credential_id,
@@ -648,6 +627,12 @@ fn event_to_message(e: GlobalCtxEvent) -> Option<String> {
             Some(format!("dhcp ip changed. old: {old:?}, new: {new:?}"))
         }
         GlobalCtxEvent::DhcpIpv4Conflicted(ip) => Some(format!("dhcp ip conflict. ip: {ip:?}")),
+        GlobalCtxEvent::DhcpIpv6Changed(old, new) => {
+            Some(format!("dhcp ipv6 changed. old: {old:?}, new: {new:?}"))
+        }
+        GlobalCtxEvent::DhcpIpv6Conflicted(ip) => {
+            Some(format!("dhcp ipv6 conflict. ip: {ip:?}"))
+        }
         // ---- 端口转发 / NAT 映射 ----
         GlobalCtxEvent::PortForwardAdded(cfg) => Some(format!("port forward added. cfg: {cfg:?}")),
         GlobalCtxEvent::ListenerPortMappingEstablished {
