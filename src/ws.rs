@@ -131,6 +131,9 @@ async fn handle_service_socket(
 
     state.ws_registry.add(info.clone(), kick_tx);
 
+    // 控制指令审计用的来源 IP（反代头优先，否则 TCP 源地址）。
+    let ip = crate::audit::client_ip(&axum::http::HeaderMap::new(), &addr);
+
     let (mut tx, mut rx_ws) = socket.split();
     let mut rx = state.hub.subscribe();
 
@@ -176,7 +179,7 @@ async fn handle_service_socket(
                     Some(Ok(Message::Close(_))) | None => break,
                     // 文本消息按指令处理：查询 / 控制类操作，处理结果以 result 事件回发。
                     Some(Ok(Message::Text(text))) => {
-                        let resp = handle_service_command(&state, text.as_str()).await;
+                        let resp = handle_service_command(&state, text.as_str(), &ip).await;
                         if tx.send(Message::Text(resp)).await.is_err() {
                             break;
                         }
@@ -204,7 +207,7 @@ async fn handle_service_socket(
 ///
 /// 控制类指令（restart/close/open/join）需服务端开启 service_control_enabled
 /// （面板「设置 → 第三方服务」开关），否则一律拒绝；get_room_info 不受开关限制。
-async fn handle_service_command(state: &AppState, raw: &str) -> String {
+async fn handle_service_command(state: &AppState, raw: &str, ip: &str) -> String {
     // 先尽力提取可回显的请求 id（失败则整体按无效 JSON 处理）。
     let id = serde_json::from_str::<serde_json::Value>(raw)
         .ok()
@@ -235,12 +238,14 @@ async fn handle_service_command(state: &AppState, raw: &str) -> String {
             match action {
                 "restart" => match state.node.restart().await {
                     Ok(instance_id) => {
+                        crate::audit::log(state, "modify", "第三方服务指令：重启网络实例", ip);
                         result_json(id, true, "", Some(json!({ "instance_id": instance_id })))
                     }
                     Err(e) => result_json(id, false, &e, None),
                 },
                 "close" => {
                     crate::api::close_room_impl(state).await;
+                    crate::audit::log(state, "modify", "第三方服务指令：关闭房间", ip);
                     result_json(id, true, "", None)
                 }
                 "open" => {
@@ -260,10 +265,13 @@ async fn handle_service_command(state: &AppState, raw: &str) -> String {
                     if let Some(game_id) = game_id {
                         // 未传 game_name 时用 game_id 兜底，与面板建房口径一致。
                         let game_name = game_name.unwrap_or_else(|| game_id.clone());
+                        // 审计描述在参数被 move 之前构造。
+                        let audit_desc = format!("第三方服务指令：创建房间（{}）", game_name);
                         match crate::api::create_room_impl(state, game_id, game_name, display_name)
                             .await
                         {
                             Ok((room, share_url, instance_id)) => {
+                                crate::audit::log(state, "modify", audit_desc, ip);
                                 let st = state.clone();
                                 tokio::spawn(async move {
                                     crate::notify::EventHub::publish(&st, "room.created").await;
@@ -283,12 +291,15 @@ async fn handle_service_command(state: &AppState, raw: &str) -> String {
                         }
                     } else {
                         match state.node.restart().await {
-                            Ok(instance_id) => result_json(
-                                id,
-                                true,
-                                "",
-                                Some(json!({ "instance_id": instance_id })),
-                            ),
+                            Ok(instance_id) => {
+                                crate::audit::log(state, "modify", "第三方服务指令：启动网络实例", ip);
+                                result_json(
+                                    id,
+                                    true,
+                                    "",
+                                    Some(json!({ "instance_id": instance_id })),
+                                )
+                            }
                             Err(e) => result_json(id, false, &e, None),
                         }
                     }
@@ -303,6 +314,12 @@ async fn handle_service_command(state: &AppState, raw: &str) -> String {
                     };
                     match crate::api::join_from_input(state, input).await {
                         Ok((room, share_url, instance_id)) => {
+                            crate::audit::log(
+                                state,
+                                "modify",
+                                format!("第三方服务指令：加入房间（{}）", room.game_name),
+                                ip,
+                            );
                             let st = state.clone();
                             tokio::spawn(async move {
                                 crate::notify::EventHub::publish(&st, "room.joined").await;

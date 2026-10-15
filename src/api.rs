@@ -24,6 +24,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::audit::{self, ClientIp};
 use crate::http::AppState;
 use crate::invite;
 use crate::models::{PeerEndpoint, RoomInvitePayload, ServerEntry};
@@ -47,15 +48,21 @@ pub struct LoginRequest {
 
 /// POST /api/auth/login：校验账密，通过后生成随机会话 token 并经 HttpOnly Cookie 下发。
 /// 硬约束：不使用 localStorage 存凭据；Cookie 带 HttpOnly + SameSite=Lax。
-pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>) -> Response {
+pub async fn login(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    Json(body): Json<LoginRequest>,
+) -> Response {
     // 读锁内完成比较后立即释放，避免跨 await。
     let ok = {
         let cfg = state.server_config.read().unwrap();
         !cfg.username.is_empty() && body.username == cfg.username && body.password == cfg.password
     };
     if !ok {
+        audit::log(&state, "login_failed", format!("登录失败（用户名：{}）", body.username), &ip);
         return err(StatusCode::UNAUTHORIZED, "用户名或密码错误");
     }
+    audit::log(&state, "login", "登录成功".to_string(), &ip);
     // 会话 token 仅存内存：服务重启后所有面板需重新登录。
     let token = uuid::Uuid::new_v4().to_string();
     state.sessions.write().unwrap().insert(token.clone());
@@ -70,10 +77,15 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
 }
 
 /// POST /api/auth/logout：删除内存会话，并用 Max-Age=0 让浏览器立即过期 Cookie。
-pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub async fn logout(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    headers: HeaderMap,
+) -> Response {
     if let Some(token) = crate::http::session_token(&headers) {
         state.sessions.write().unwrap().remove(&token);
     }
+    audit::log(&state, "logout", "退出登录".to_string(), &ip);
     (
         [(
             header::SET_COOKIE,
@@ -104,6 +116,15 @@ pub async fn logs(
 ) -> impl IntoResponse {
     let tail = q.tail.unwrap_or(200).min(800);
     Json(json!({ "logs": state.node.logs(tail) }))
+}
+
+/// GET /api/audit-logs?tail=N：返回最近的操作审计记录（新→旧），默认 100 条、上限 500 条。
+pub async fn audit_logs(
+    State(state): State<AppState>,
+    Query(q): Query<LogsQuery>,
+) -> impl IntoResponse {
+    let tail = q.tail.unwrap_or(100).min(500);
+    Json(json!({ "logs": state.audit.list(tail) }))
 }
 
 /// GET /api/config：返回 config.toml 原文及路径（供面板"配置文件"编辑器）。
@@ -172,8 +193,28 @@ pub async fn get_profile(State(state): State<AppState>) -> impl IntoResponse {
 /// 头像单独存 avatar.bin；自动加入与自动创建强制互斥；更新后返回最新完整资料。
 pub async fn put_profile(
     State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
     Json(req): Json<PutProfileRequest>,
 ) -> Response {
+    // 审计描述：列出本次请求实际提交的字段（字段在下方会被 move，先收集标签）。
+    let changed: Vec<&str> = [
+        req.nickname.as_ref().map(|_| "昵称"),
+        req.icon.as_ref().map(|_| "图标"),
+        req.disable_p2p.as_ref().map(|_| "禁用P2P"),
+        req.enable_tun.as_ref().map(|_| "TUN开关"),
+        req.static_ipv4.as_ref().map(|_| "静态IP"),
+        req.avatar.as_ref().map(|_| "头像"),
+        req.auto_join_enabled.as_ref().map(|_| "自动加入开关"),
+        req.auto_join_code.as_ref().map(|_| "自动加入邀请"),
+        req.auto_create_enabled.as_ref().map(|_| "自动创建开关"),
+        req.auto_create_game_id.as_ref().map(|_| "自动创建游戏"),
+        req.auto_create_game_name.as_ref().map(|_| "自动创建游戏名"),
+        req.service_control_enabled.as_ref().map(|_| "第三方控制开关"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
     // 第一段：更新内存中的 ServerConfig 并做合法性校验（整个块持有写锁）。
     {
         let mut cfg = state.server_config.write().unwrap();
@@ -237,6 +278,15 @@ pub async fn put_profile(
             return err(StatusCode::BAD_REQUEST, "启用自动创建时，请先选择预设游戏");
         }
     }
+    // 校验全部通过后才记入审计，避免失败请求污染记录。
+    if !changed.is_empty() {
+        audit::log(
+            &state,
+            "modify",
+            format!("修改服务端设置（{}）", changed.join("、")),
+            &ip,
+        );
+    }
 
     // 第二段：头像独立于 TOML，以原始字节存 avatar.bin。
     // None=不变；空串=清除；非空 base64=解码并限 512KB 后覆盖写入。
@@ -290,7 +340,11 @@ pub struct StartRequest {
 }
 
 /// POST /api/start：用请求体配置或磁盘配置启动（重启）EasyTier 实例。
-pub async fn start(State(state): State<AppState>, Json(req): Json<StartRequest>) -> Response {
+pub async fn start(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    Json(req): Json<StartRequest>,
+) -> Response {
     // 无论配置来自请求体还是文件，都先经 parse 剥离 [astral_server]，只把内核配置交给节点。
     let toml = match req.config {
         Some(cfg) => match crate::config::parse(&cfg) {
@@ -307,7 +361,10 @@ pub async fn start(State(state): State<AppState>, Json(req): Json<StartRequest>)
     };
 
     match state.node.start(toml).await {
-        Ok(id) => Json(json!({ "ok": true, "instance_id": id })).into_response(),
+        Ok(id) => {
+            audit::log(&state, "modify", "启动网络实例".to_string(), &ip);
+            Json(json!({ "ok": true, "instance_id": id })).into_response()
+        }
         Err(e) => {
             (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "error": e }))).into_response()
         }
@@ -315,15 +372,19 @@ pub async fn start(State(state): State<AppState>, Json(req): Json<StartRequest>)
 }
 
 /// POST /api/stop：停止当前实例（不断开 HTTP 服务本身）。
-pub async fn stop(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn stop(State(state): State<AppState>, ClientIp(ip): ClientIp) -> impl IntoResponse {
     state.node.stop().await;
+    audit::log(&state, "modify", "停止网络实例".to_string(), &ip);
     Json(json!({ "ok": true }))
 }
 
 /// POST /api/restart：用最近一次配置重启实例。
-pub async fn restart(State(state): State<AppState>) -> Response {
+pub async fn restart(State(state): State<AppState>, ClientIp(ip): ClientIp) -> Response {
     match state.node.restart().await {
-        Ok(id) => Json(json!({ "ok": true, "instance_id": id })).into_response(),
+        Ok(id) => {
+            audit::log(&state, "modify", "重启网络实例".to_string(), &ip);
+            Json(json!({ "ok": true, "instance_id": id })).into_response()
+        }
         Err(e) => {
             (StatusCode::BAD_REQUEST, Json(json!({ "ok": false, "error": e }))).into_response()
         }
@@ -340,6 +401,7 @@ pub struct PutConfigRequest {
 /// PUT /api/config：面板"配置文件"编辑器保存接口（整文件覆盖写）。
 pub async fn put_config(
     State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
     Json(req): Json<PutConfigRequest>,
 ) -> Response {
     // 先解析校验，避免把坏配置写进文件。
@@ -351,6 +413,12 @@ pub async fn put_config(
     if let Err(e) = std::fs::write(&state.config_path, &req.config) {
         return err(StatusCode::INTERNAL_SERVER_ERROR, format!("写入配置失败: {e}"));
     }
+    audit::log(
+        &state,
+        "modify",
+        format!("保存配置文件（{}）", if req.restart.unwrap_or(false) { "并重启实例" } else { "未重启" }),
+        &ip,
+    );
 
     // 要求重启时用剥离后的内核配置重启；否则只落盘不影响运行中的实例。
     if req.restart.unwrap_or(false) {
@@ -384,10 +452,14 @@ fn default_reusable() -> bool {
 /// POST /api/credentials：生成一张进网凭据。
 pub async fn create_credential(
     State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
     Json(req): Json<CreateCredentialRequest>,
 ) -> Response {
     match state.node.generate_credential(req.ttl_seconds, req.reusable).await {
-        Ok(c) => Json(c).into_response(),
+        Ok(c) => {
+            audit::log(&state, "modify", format!("创建进网凭据（有效期 {} 秒）", req.ttl_seconds), &ip);
+            Json(c).into_response()
+        }
         Err(e) => err(StatusCode::BAD_REQUEST, e),
     }
 }
@@ -403,10 +475,16 @@ pub async fn list_credentials(State(state): State<AppState>) -> Response {
 /// DELETE /api/credentials/:id：撤销指定凭据。
 pub async fn revoke_credential(
     State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
     Path(id): Path<String>,
 ) -> Response {
-    match state.node.revoke_credential(id).await {
-        Ok(success) => Json(json!({ "ok": success })).into_response(),
+    match state.node.revoke_credential(id.clone()).await {
+        Ok(success) => {
+            if success {
+                audit::log(&state, "modify", format!("撤销进网凭据 {id}"), &ip);
+            }
+            Json(json!({ "ok": success })).into_response()
+        }
         Err(e) => err(StatusCode::BAD_REQUEST, e),
     }
 }
@@ -428,10 +506,13 @@ pub struct CreateRoomRequest {
 /// POST /api/room/create：REST 包装；成功后异步广播 room.created 事件（WS + 邮件）。
 pub async fn create_room(
     State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
     Json(req): Json<CreateRoomRequest>,
 ) -> Response {
+    let audit_desc = format!("创建房间「{}」", req.game_name);
     match create_room_impl(&state, req.game_id, req.game_name, req.display_name).await {
         Ok((room, share_url, instance_id)) => {
+            audit::log(&state, "modify", audit_desc, &ip);
             // 广播房间变动（WebSocket + 邮件）
             let st = state.clone();
             tokio::spawn(async move {
@@ -540,10 +621,12 @@ pub struct JoinRoomRequest {
 /// POST /api/room/join：REST 包装；成功后异步广播 room.joined 事件。
 pub async fn join_room(
     State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
     Json(req): Json<JoinRoomRequest>,
 ) -> Response {
     match join_from_input(&state, req.input).await {
         Ok((room, share_url, instance_id)) => {
+            audit::log(&state, "modify", format!("加入房间「{}」", room.game_name), &ip);
             // 广播房间变动（WebSocket + 邮件）
             let st = state.clone();
             tokio::spawn(async move {
@@ -616,8 +699,9 @@ pub async fn join_from_input(
 }
 
 /// POST /api/room/leave：停止实例、清空当前房间，并广播 room.left（不发邮件）。
-pub async fn leave_room(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn leave_room(State(state): State<AppState>, ClientIp(ip): ClientIp) -> impl IntoResponse {
     close_room_impl(&state).await;
+    audit::log(&state, "modify", "离开/关闭房间".to_string(), &ip);
     Json(json!({ "ok": true }))
 }
 
@@ -942,10 +1026,15 @@ pub struct AddServerRequest {
 }
 
 /// POST /api/servers：新增服务器，默认启用，id 与排序号取当前最大值 +1。
-pub async fn add_server(Json(req): Json<AddServerRequest>) -> Response {
+pub async fn add_server(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    Json(req): Json<AddServerRequest>,
+) -> Response {
     let mut list = store::load_servers();
     let id = list.iter().map(|s| s.id).max().unwrap_or(0) + 1;
     let sort_order = list.iter().map(|s| s.sort_order).max().unwrap_or(0) + 1;
+    let name = req.name.clone();
     list.push(ServerEntry {
         id,
         name: req.name,
@@ -954,7 +1043,10 @@ pub async fn add_server(Json(req): Json<AddServerRequest>) -> Response {
         sort_order,
     });
     match store::save_servers(&list) {
-        Ok(_) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Ok(_) => {
+            audit::log(&state, "modify", format!("新增中继服务器「{name}」"), &ip);
+            Json(json!({ "ok": true, "id": id })).into_response()
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("保存失败: {e}")),
     }
 }
@@ -969,6 +1061,8 @@ pub struct UpdateServerRequest {
 
 /// PUT /api/servers/:id：按 id 修改服务器条目（局部更新）。
 pub async fn update_server(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
     Path(id): Path<u64>,
     Json(req): Json<UpdateServerRequest>,
 ) -> Response {
@@ -976,25 +1070,47 @@ pub async fn update_server(
     let Some(s) = list.iter_mut().find(|s| s.id == id) else {
         return err(StatusCode::NOT_FOUND, "服务器不存在");
     };
-    if let Some(n) = req.name { s.name = n; }
-    if let Some(u) = req.uri { s.uri = u; }
-    if let Some(e) = req.enabled { s.enabled = e; }
+    let name = s.name.clone();
+    let mut desc = String::new();
+    if let Some(n) = req.name {
+        s.name = n;
+        desc.push_str("改名");
+    }
+    if let Some(u) = req.uri {
+        s.uri = u;
+        desc.push_str(if desc.is_empty() { "改地址" } else { "、改地址" });
+    }
+    if let Some(e) = req.enabled {
+        s.enabled = e;
+        desc.push_str(if e { "启用" } else { "停用" });
+    }
     match store::save_servers(&list) {
-        Ok(_) => Json(json!({ "ok": true })).into_response(),
+        Ok(_) => {
+            audit::log(&state, "modify", format!("修改中继服务器「{name}」（{desc}）"), &ip);
+            Json(json!({ "ok": true })).into_response()
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("保存失败: {e}")),
     }
 }
 
 /// DELETE /api/servers/:id：按 id 删除服务器；条目不存在返回 404。
-pub async fn delete_server(Path(id): Path<u64>) -> Response {
+pub async fn delete_server(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    Path(id): Path<u64>,
+) -> Response {
     let mut list = store::load_servers();
     let len_before = list.len();
+    let name = list.iter().find(|s| s.id == id).map(|s| s.name.clone());
     list.retain(|s| s.id != id);
     if list.len() == len_before {
         return err(StatusCode::NOT_FOUND, "服务器不存在");
     }
     match store::save_servers(&list) {
-        Ok(_) => Json(json!({ "ok": true })).into_response(),
+        Ok(_) => {
+            audit::log(&state, "modify", format!("删除中继服务器「{}」", name.unwrap_or_default()), &ip);
+            Json(json!({ "ok": true })).into_response()
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("保存失败: {e}")),
     }
 }
@@ -1058,6 +1174,7 @@ pub struct RecipientsRequest {
 /// 更新收件人邮箱列表（面板维护，写回 config.toml）。
 pub async fn put_recipients(
     State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
     Json(req): Json<RecipientsRequest>,
 ) -> Response {
     // trim → 去重 → 基本格式校验，保持顺序
@@ -1080,6 +1197,12 @@ pub async fn put_recipients(
             return err(StatusCode::INTERNAL_SERVER_ERROR, format!("保存配置失败: {e}"));
         }
     }
+    audit::log(
+        &state,
+        "modify",
+        format!("更新邮件收件人（共 {} 个）", recipients.len()),
+        &ip,
+    );
     Json(json!({ "ok": true, "recipients": recipients })).into_response()
 }
 
@@ -1153,7 +1276,7 @@ pub async fn get_ws_key(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 /// 刷新第三方服务连接密钥：生成新密钥并写回配置，旧密钥立即失效（所有已连接服务被踢下线）。
-pub async fn rotate_ws_key(State(state): State<AppState>) -> Response {
+pub async fn rotate_ws_key(State(state): State<AppState>, ClientIp(ip): ClientIp) -> Response {
     let new_key = crate::config::generate_ws_key();
     {
         let mut cfg = state.server_config.write().unwrap();
@@ -1163,6 +1286,7 @@ pub async fn rotate_ws_key(State(state): State<AppState>) -> Response {
         }
     }
     let kicked = state.ws_registry.kick_all();
+    audit::log(&state, "modify", format!("刷新第三方服务密钥（踢下线 {kicked} 个连接）"), &ip);
     Json(json!({ "ok": true, "key": new_key, "disconnected": kicked })).into_response()
 }
 
@@ -1219,7 +1343,11 @@ pub async fn check_update() -> Response {
 }
 
 /// 下载指定版本并替换自身二进制，然后重启服务。
-pub async fn apply_update(Json(body): Json<ApplyUpdateRequest>) -> Response {
+pub async fn apply_update(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    Json(body): Json<ApplyUpdateRequest>,
+) -> Response {
     if body.download_url.is_empty() {
         return err(StatusCode::BAD_REQUEST, "download_url 不能为空");
     }
@@ -1230,6 +1358,7 @@ pub async fn apply_update(Json(body): Json<ApplyUpdateRequest>) -> Response {
     {
         return err(StatusCode::BAD_REQUEST, "下载地址必须来自 GitHub");
     }
+    audit::log(&state, "modify", format!("执行在线更新：{}", body.download_url), &ip);
     // 下载→chmod→备份→原子替换→systemctl restart 均在 update 模块内完成。
     match crate::update::apply_update(&body.download_url).await {
         Ok(()) => Json(json!({ "ok": true, "message": "更新已应用，服务即将重启" })).into_response(),

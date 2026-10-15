@@ -45,6 +45,8 @@ pub struct AppState {
     pub hub: Arc<crate::notify::EventHub>,
     /// 在线第三方服务注册表（WebSocket 密钥认证连接）
     pub ws_registry: Arc<crate::ws::WsRegistry>,
+    /// 操作审计日志（登录/登出/修改操作，含操作者 IP，保留 14 天）
+    pub audit: Arc<crate::audit::AuditLog>,
 }
 
 /// 组装完整路由树：受保护的 `/api` 业务路由 + 不鉴权的登录/第三方 WS 路由 + 前端页面。
@@ -88,7 +90,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/smtp/test", post(crate::api::test_smtp))
         .route("/smtp/send-now", post(crate::api::send_now_smtp))
         .route("/update/check", get(crate::api::check_update))
-        .route("/update/apply", post(crate::api::apply_update));
+        .route("/update/apply", post(crate::api::apply_update))
+        // 操作审计记录（登录/修改操作，含 IP）
+        .route("/audit-logs", get(crate::api::audit_logs));
 
     // 登录/登出接口不鉴权（route_layer 只作用于已注册路由，merge 进来的不受影响）
     let auth_routes = Router::new()
@@ -200,6 +204,7 @@ fn unauthorized() -> Response {
 }
 
 /// 鉴权中间件：未配置用户名时直通；否则要求有效 Cookie 会话或 Basic Auth。
+/// 附加安全审计：未通过鉴权的写操作（非 GET）记入审计日志，暴露暴力尝试。
 async fn auth_middleware(
     state: AppState,
     request: axum::extract::Request,
@@ -213,6 +218,20 @@ async fn auth_middleware(
     if allowed {
         next.run(request).await
     } else {
+        // 未授权的写尝试：记录方法与路径（GET 轮询失败太常见，不记以免噪音）。
+        if request.method() != Method::GET {
+            let addr = request
+                .extensions()
+                .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                .map(|c| c.0)
+                .unwrap_or(([0, 0, 0, 0], 0).into());
+            let ip = crate::audit::client_ip(request.headers(), &addr);
+            state.audit.record(
+                "modify_denied",
+                format!("未授权访问 {} {}", request.method(), request.uri().path()),
+                ip,
+            );
+        }
         // 前端 fetch 收到 401 后会切换到登录视图。
         unauthorized()
     }

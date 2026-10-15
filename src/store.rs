@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use crate::models::ServerEntry;
 
 /// 获取可执行文件所在目录；取不到（极少数环境）时回退为当前目录 "."。
-fn exe_dir() -> PathBuf {
+pub fn exe_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))

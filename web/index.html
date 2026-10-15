@@ -27,10 +27,12 @@
   --danger: #EF4444;
   --warning: #F59E0B;
   --radius: 12px;
+  --radius-sm: 9px;
+  --bg3: #F1F0F6;
   --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
 }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); display:flex; height:100vh; overflow:hidden; }
+body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--bg); color:var(--text); display:flex; height:100vh; height:100dvh; overflow:hidden; }
 
 /* ===== 侧边栏 ===== */
 .sidebar { width:216px; background:var(--bg-sidebar); border-right:1px solid var(--border); display:flex; flex-direction:column; padding:20px 12px; flex-shrink:0; }
@@ -203,6 +205,52 @@ textarea { font-family:"Cascadia Code",Consolas,monospace; font-size:12px; }
 .login-sub { text-align:center; color:var(--text2); font-size:13px; margin-bottom:24px; }
 #login-view input { margin-bottom:12px; }
 .login-error { color:var(--danger); font-size:12px; min-height:16px; margin:4px 0 8px; }
+
+/* ===== 操作记录（审计日志） ===== */
+.audit-row { display:flex; align-items:center; gap:12px; padding:11px 2px; border-bottom:1px solid var(--border); font-size:13px; }
+.audit-row:last-child { border-bottom:none; }
+.audit-action { flex:1; min-width:40%; word-break:break-all; }
+.audit-ip, .audit-time { color:var(--text2); font-size:12px; white-space:nowrap; }
+.tag.red { background:rgba(239,68,68,.12); color:var(--danger); }
+.tag.amber { background:rgba(245,158,11,.16); color:var(--warning); }
+.audit-new { animation:auditFlash .9s ease; }
+@keyframes auditFlash { from { background:var(--primary-softer); } to { background:transparent; } }
+
+/* ===== 响应式布局（平板 ≤1024 / 侧栏抽屉 ≤900 / 手机 ≤640） ===== */
+.menu-btn { display:none; }
+.nav-scrim { display:none; }
+@media (max-width:1024px){
+  .topbar { padding:16px 18px 6px; }
+  .content { padding:10px 18px 24px; }
+  .room-grid { grid-template-columns:1fr 290px; }
+}
+@media (max-width:900px){
+  .menu-btn { display:flex; }
+  .sidebar { position:fixed; left:0; top:0; bottom:0; width:252px; z-index:220; transform:translateX(-105%); transition:transform .25s ease; box-shadow:4px 0 24px rgba(0,0,0,.18); }
+  body.nav-open .sidebar { transform:none; }
+  body.nav-open .nav-scrim { display:block; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:210; }
+  .room-grid { grid-template-columns:1fr; }
+}
+@media (max-width:640px){
+  .topbar { padding:12px 14px 4px; gap:8px; }
+  .topbar .g-avatar { width:36px; height:36px; font-size:18px; }
+  .topbar .g-title { font-size:15px; }
+  .topbar .actions .btn { padding:6px 12px; font-size:12px; }
+  .content { padding:8px 12px 28px; }
+  .card { padding:16px 14px; margin-bottom:12px; }
+  .stats { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .stat { padding:13px; }
+  .stat .s-num { font-size:20px; margin-top:5px; }
+  .hero { padding:34px 10px 26px; }
+  .hero .big { font-size:42px; }
+  .hero .cta { flex-direction:column; align-items:stretch; }
+  input[type="text"],input[type="password"],textarea,select { font-size:16px; }
+  .settings-row { flex-wrap:wrap; gap:10px 14px; }
+  .emoji-grid { grid-template-columns:repeat(7,1fr); }
+  .modal { padding:18px 16px; }
+  .audit-row { flex-wrap:wrap; }
+  .toast { left:14px; right:14px; top:auto; bottom:16px; max-width:none; text-align:center; }
+}
 </style>
 </head>
 <body>
@@ -238,7 +286,9 @@ textarea { font-family:"Cascadia Code",Consolas,monospace; font-size:12px; }
 
 <div class="main">
   <!-- 顶栏 -->
+  <div class="nav-scrim" onclick="closeNav()"></div>
   <div class="topbar">
+    <button class="btn btn-outline btn-sm menu-btn" onclick="toggleNav()">☰</button>
     <div class="greet">
       <div class="g-avatar" id="top-avatar">🎮</div>
       <div>
@@ -496,6 +546,13 @@ textarea { font-family:"Cascadia Code",Consolas,monospace; font-size:12px; }
           <div><div class="settings-label">退出登录</div><div class="settings-desc">清除当前浏览器的登录会话</div></div>
           <button class="btn btn-danger btn-sm" onclick="doLogout()">退出登录</button>
         </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">操作记录 <span class="sub" style="font-weight:400;">保留最近 14 天</span>
+          <button class="btn btn-outline btn-sm" style="margin-left:auto;" onclick="loadAuditLogs()">刷新</button>
+        </div>
+        <div id="audit-list"><div style="color:var(--text2);font-size:13px;">加载中…</div></div>
       </div>
     </div>
   </div>
@@ -794,14 +851,18 @@ async function copyText(text) {
 /* ================= 页面切换 ================= */
 // 侧边栏页面切换：切 .active 类，并按需懒加载目标页数据。
 function switchPage(name) {
+  closeNav();
   currentPage = name;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   document.querySelectorAll('.nav-item[data-page]').forEach(n=>n.classList.toggle('active', n.dataset.page===name));
   if(name==='servers') loadServers();
-  if(name==='settings') { loadSettings(); loadLogs('settings-log-panel'); renderThemeOptions(); }
+  if(name==='settings') { loadSettings(); loadLogs('settings-log-panel'); renderThemeOptions(); loadAuditLogs(); }
   if(name==='about') loadAbout();
 }
+/* ================= 窄屏侧栏抽屉 ================= */
+function toggleNav(){ document.body.classList.toggle('nav-open'); }
+function closeNav(){ document.body.classList.remove('nav-open'); }
 async function loadAbout() {
   try {
     const d = await api('/status');
@@ -1450,6 +1511,16 @@ function disconnectEventWs() {
 /// 处理服务端推送：同步房间状态；房间码实际变动时提示。
 function handleRoomEvent(msg) {
   if (!msg || !msg.event) return;
+  // 审计日志实时推送：设置页可见时直接插入列表顶部并闪光提示
+  if (msg.event === 'audit' && msg.entry) {
+    const el = document.getElementById('audit-list');
+    if (el && document.getElementById('page-settings').classList.contains('active')) {
+      if (!el.querySelector('.audit-row')) el.innerHTML = '';
+      el.insertAdjacentHTML('afterbegin', auditRowHtml(msg.entry, true));
+      while (el.children.length > 200) el.lastElementChild.remove();
+    }
+    return;
+  }
   if (msg.room) {
     const before = currentRoom ? (currentRoom.short_code || '') : '';
     const after = msg.room.short_code || '';
@@ -1570,6 +1641,31 @@ async function loadSettings(){
   loadWsServices();
   renderWsEndpoint();
   if (!eventWs && wsEnabled) connectEventWs();
+}
+/* ================= 操作记录（审计日志） ================= */
+function auditKind(kind){
+  switch(kind){
+    case 'login': return '<span class="tag green">登录</span>';
+    case 'login_failed': return '<span class="tag red">登录失败</span>';
+    case 'logout': return '<span class="tag">登出</span>';
+    case 'modify': return '<span class="tag primary">修改</span>';
+    case 'modify_denied': return '<span class="tag amber">未授权尝试</span>';
+    default: return `<span class="tag">${esc(kind)}</span>`;
+  }
+}
+function auditRowHtml(e, isNew){
+  const t = e.ts ? new Date(e.ts*1000).toLocaleString() : '';
+  return `<div class="audit-row${isNew?' audit-new':''}">${auditKind(e.kind)}<span class="audit-action">${esc(e.action)}</span><span class="audit-ip">${esc(e.ip||'')}</span><span class="audit-time">${esc(t)}</span></div>`;
+}
+async function loadAuditLogs(){
+  const el = document.getElementById('audit-list');
+  if (!el) return;
+  try {
+    const d = await api('/audit-logs?tail=100');
+    const logs = d.logs || [];
+    if (!logs.length) { el.innerHTML = '<div style="color:var(--text2);font-size:13px;">暂无操作记录</div>'; return; }
+    el.innerHTML = logs.map(e=>auditRowHtml(e,false)).join('');
+  } catch(e) {}
 }
 // 读取 config.toml 原文到高级编辑器。
 async function loadConfig(){ try{ const d=await api('/config'); document.getElementById('config-editor').value=d.config; }catch(e){ toast(e.message,'error'); } }

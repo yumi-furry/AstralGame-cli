@@ -56,6 +56,12 @@ impl EventHub {
         })
     }
 
+    /// 广播一条已构建好的原始事件负载（不走房间邮件逻辑）。
+    /// 供审计日志等与房间无关的事件使用；无订阅者时 send 返回 Err，属正常情况。
+    pub fn publish_raw(state: &AppState, payload: Value) {
+        let _ = state.hub.tx.send(payload.to_string());
+    }
+
     /// 发布事件：先广播，再按需发邮件（邮件只在存在房间时发送）。
     pub async fn publish(state: &AppState, event: &str) {
         let payload = Self::build_payload(state, event);

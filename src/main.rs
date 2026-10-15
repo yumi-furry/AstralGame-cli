@@ -13,6 +13,7 @@
 
 // ---------- 业务模块（每个模块对应 src/ 下一个同名 .rs 文件） ----------
 mod api; // REST API 处理器（登录、房间、服务器、凭据、SMTP、更新等）
+mod audit; // 操作审计日志（登录/登出/修改记录，含操作者 IP，保留 14 天）
 mod config; // config.toml 的结构定义、解析、写回与示例配置
 mod http; // Axum 路由表与鉴权中间件（Cookie 会话优先，Basic Auth 兼容）
 mod invite; // AG1. 离线邀请串 / 短码 / 分享链接的生成与解析
@@ -151,6 +152,8 @@ async fn run_server(config_path: &PathBuf) -> anyhow::Result<()> {
     let node = node::NodeRuntime::new(server_config.clone());
     // 房间变动事件中心（WebSocket 广播通道，邮件发送也挂在它上面）。
     let hub = Arc::new(notify::EventHub::new());
+    // 操作审计日志：加载历史（audit_log.json）并顺带清理 14 天前的过期记录。
+    let audit = Arc::new(audit::AuditLog::load());
 
     let app_state = http::AppState {
         node: node.clone(),
@@ -162,7 +165,16 @@ async fn run_server(config_path: &PathBuf) -> anyhow::Result<()> {
         sessions: Arc::new(std::sync::RwLock::new(std::collections::HashSet::new())),
         hub: hub.clone(),
         ws_registry: Arc::new(ws::WsRegistry::new()),
+        audit: audit.clone(),
     };
+
+    // 审计日志每日清理：周期性丢弃 14 天前的过期记录并回写文件。
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(24 * 60 * 60)).await;
+            audit.prune();
+        }
+    });
 
     // 启动联网：优先执行守护进程自动创建预设房间；
     // 其次自动加入预设房间；均未启用时沿用旧逻辑——配置含 EasyTier 实例节则自动联网。
